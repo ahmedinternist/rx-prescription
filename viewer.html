@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Prescription Viewer</title>
+<style>
+  :root { --ink:#0b3d91; --line:#dce3f2; --bg:#f5f7fb; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+         background:var(--bg); color:#1a1a1a; }
+  .wrap { max-width: 720px; margin: 24px auto; padding: 0 16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px;
+          box-shadow:0 4px 18px rgba(11,61,145,.08); overflow:hidden; }
+  header { background:var(--ink); color:#fff; padding:22px 24px; text-align:center; }
+  header h1 { margin:0; font-size:20px; letter-spacing:.5px; }
+  header .sub { font-size:12px; opacity:.85; margin-top:4px; }
+  .section { padding:18px 24px; border-bottom:1px solid var(--line); }
+  .section h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase;
+                letter-spacing:.8px; color:var(--ink); }
+  .kv { display:flex; flex-wrap:wrap; gap:6px 24px; font-size:14px; }
+  .kv div { min-width:140px; }
+  .kv span { color:#666; display:block; font-size:11px; text-transform:uppercase; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#f0f4fc; color:var(--ink); font-size:11px; text-transform:uppercase; }
+  .badge { display:inline-block; background:#e7f0ff; color:var(--ink);
+           border-radius:6px; padding:2px 8px; font-size:11px; }
+  .empty { padding:40px; text-align:center; color:#888; }
+  .foot { padding:16px 24px; font-size:11px; color:#888; text-align:center; }
+  .rxid { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <header>
+      <h1 id="clinicName">Prescription</h1>
+      <div class="sub" id="clinicSub"></div>
+    </header>
+
+    <div id="content">
+      <div class="empty">Reading QR code…</div>
+    </div>
+
+    <div class="foot">
+      This page never sends your data to a server — everything is decoded from the link itself.
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- decoders (mirror of the desktop app) ----
+function b64urlToBytes(s){
+  s = s.replace(/-/g,'+').replace(/_/g,'/');
+  while(s.length % 4) s += '=';
+  const bin = atob(s);
+  const bytes = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return bytes;
+}
+async function decode(){
+  let hash = location.hash.replace(/^#/,'');
+  hash = hash.replace(/^#/,'');  // tolerate double-hash from older links
+  if(!hash){ showEmpty('No prescription data found in this link.'); return; }
+  try{
+    // Try plain JSON first (uncompressed payload).
+    const json = JSON.parse(atob(hash.replace(/-/g,'+').replace(/_/g,'/')));
+    render(json);
+    return;
+  }catch(e){ /* fall through to compressed */ }
+  try{
+    // Compressed payload: base64url -> zlib -> JSON
+    const bytes = b64urlToBytes(hash);
+    const ds = new DecompressionStream('deflate');  // zlib-wrapped, matches Python zlib.compress
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    const text = await new Response(stream).text();
+    render(JSON.parse(text));
+  }catch(e2){
+    showEmpty('Could not decode this prescription. The link may be incomplete.\n'+e2);
+  }
+}
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function kv(list){
+  return '<div class="kv">'+list.filter(Boolean).map(o=>
+    `<div><span>${esc(o.l)}</span>${esc(o.v)}</div>`).join('')+'</div>';
+}
+function render(p){
+  const c = p.clinic||{}, d = p.doctor||{}, pat = p.patient||{};
+  // Clinic line removed from the app; only show if a payload happens to include one.
+  if(c.name){
+    document.getElementById('clinicName').textContent = c.name;
+    const sub = [c.address, c.phone?('Tel: '+c.phone):''].filter(Boolean).join(' · ');
+    document.getElementById('clinicSub').textContent = sub;
+  } else {
+    document.getElementById('clinicName').textContent = 'Prescription';
+    document.getElementById('clinicSub').textContent = '';
+  }
+
+  const docBits=[];
+  if(d.name) docBits.push({l:'Prescriber', v:d.name});
+  if(d.specialty) docBits.push({l:'Specialty', v:d.specialty});
+  if(d.license_no) docBits.push({l:'License No.', v:d.license_no});
+  if(d.phone) docBits.push({l:'Phone', v:d.phone});
+
+  const patBits=[];
+  if(pat.name) patBits.push({l:'Patient', v:pat.name});
+  if(pat.sex) patBits.push({l:'Sex', v:pat.sex});
+  if(pat.age) patBits.push({l:'Age', v:pat.age});
+  if(pat.id_number) patBits.push({l:'ID', v:pat.id_number});
+
+  let html = '';
+  html += `<div class="section"><h2>Prescriber</h2>${kv(docBits)}</div>`;
+  html += `<div class="section"><h2>Patient</h2>${kv(patBits)}`+
+          (p.date?`<div class="rxid" style="margin-top:8px">Date: ${esc(p.date)}</div>`:'')+
+          (p.rx_id?`<div class="rxid">Rx No: ${esc(p.rx_id)}</div>`:'')+`</div>`;
+
+  html += '<div class="section"><h2>Medications</h2>';
+  const drugs = p.drugs||[];
+  if(drugs.length){
+    html += '<table><thead><tr><th>#</th><th>Drug</th><th>Dosage</th><th>Frequency</th>'+
+            '<th>Duration</th><th>Notes</th></tr></thead><tbody>';
+    drugs.forEach((m,i)=>{
+      const name = (m.generic_name||'') + (m.brand_name?` <span class="badge">${esc(m.brand_name)}</span>`:'');
+      html += `<tr><td>${i+1}</td><td>${name}</td><td>${esc(m.dosage)}</td>`+
+              `<td>${esc(m.frequency)}</td><td>${esc(m.duration)}</td><td>${esc(m.notes)}</td></tr>`;
+    });
+    html += '</tbody></table>';
+  } else {
+    html += '<div class="empty">No medications listed.</div>';
+  }
+  html += '</div>';
+
+  document.getElementById('content').innerHTML = html;
+}
+function showEmpty(msg){
+  document.getElementById('content').innerHTML =
+    '<div class="empty"><pre style="white-space:pre-wrap">'+esc(msg)+'</pre></div>';
+}
+decode();
+window.addEventListener('hashchange', decode);
+</script>
+</body>
+</html>

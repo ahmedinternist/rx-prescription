@@ -1,0 +1,49 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging (PyInstaller build artifacts)
+build/
+dist/
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-file.txt
+
+# Unit test / coverage artifacts
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+*.egg-info/
+.eggs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp verification artifacts (from local testing)
+_*.txt
+_*.mjs
+live_viewer.html
+
+# Data files that are not the seed DB
+data/*.xlsx
+data/*.xls

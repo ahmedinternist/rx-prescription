@@ -1,0 +1,28 @@
+generic_name,brand_name,strength,form,category,notes
+Amoxicillin,Amoxil,500 mg,capsule,antibiotic,Take with food
+Amoxicillin/Clavulanate,Augmentin,625 mg,tablet,antibiotic,
+Azithromycin,Zithromax,500 mg,tablet,antibiotic,Single daily dose
+Ibuprofen,Brufen,400 mg,tablet,NSAID,Take after meals
+Paracetamol,Panadol,500 mg,tablet,analgesic,Max 4g per day
+Omeprazole,Losec,20 mg,capsule,PPI,
+Cetirizine,Zyrtec,10 mg,tablet,antihistamine,
+Metformin,Glucophage,500 mg,tablet,antidiabetic,
+Amlodipine,Norvasc,5 mg,tablet,antihypertensive,
+Salbutamol,Ventolin,100 mcg,inhaler,bronchodilator,
+Prednisolone,Deltasone,5 mg,tablet,corticosteroid,
+Ciprofloxacin,Cipro,500 mg,tablet,antibiotic,
+Diclofenac,Voltaren,50 mg,tablet,NSAID,
+Loratadine,Claritin,10 mg,tablet,antihistamine,
+Levothyroxine,Synthroid,50 mcg,tablet,hormone,Take on empty stomach
+Insulin glargine,Lantus,100 IU/ml,injection,antidiabetic,
+Ceftriaxone,Rocephin,1 g,injection,antibiotic,
+Ondansetron,Zofran,4 mg,tablet,antiemetic,
+Vitamin D3,Colecalciferol,1000 IU,tablet,vitamin,
+Ferrous sulfate,Feosol,325 mg,tablet,iron supplement,Take with vitamin C
+Captopril,Capoten,25 mg,tablet,ACE inhibitor,
+Losartan,Cozaar,50 mg,tablet,ARB,
+Atorvastatin,Lipitor,20 mg,tablet,statin,
+Aspirin,Aspro,75 mg,tablet,antiplatelet,
+Metronidazole,Flagyl,500 mg,tablet,antiprotozoal,
+Diazepam,Valium,5 mg,tablet,benzodiazepine,
+Furosemide,Lasix,40 mg,tablet,diuretic,
