@@ -18,12 +18,14 @@ Run:  python main.py
 from __future__ import annotations
 
 import datetime
+import logging
 import os
 import tempfile
 import tkinter as tk
+import uuid
 import webbrowser
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 from typing import List
 
 import customtkinter as ctk
@@ -38,6 +40,17 @@ ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
 APP_TITLE = "Rx Prescription Printer"
+
+logging.basicConfig(filename=cfg.LOG_PATH, level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(message)s")
+
+
+def _report_exception(exc_type, exc_value, exc_traceback):
+    logging.exception("Unexpected application error", exc_info=(exc_type, exc_value, exc_traceback))
+    messagebox.showerror(APP_TITLE, f"An unexpected error occurred. Details were saved to:\n{cfg.LOG_PATH}")
+
+
+tk.Tk.report_callback_exception = staticmethod(_report_exception)
 
 # --- Softer, cohesive modern palette (Windows 11 card style) ----------------
 BG = "#eef1f7"          # neutral app background
@@ -291,6 +304,14 @@ class App(ctk.CTk):
                                            dropdown_hover_color=ACCENT_SOFT,
                                            command=self.on_lang_change)
         self.lang_menu.pack(side="left", padx=2)
+        ctk.CTkLabel(self.toolbar, text="Profile:", text_color=MUTED).pack(side="left", padx=(16, 4))
+        self.profile_var = tk.StringVar(value=cfg.config.get("active_profile", "Default"))
+        self.profile_menu = ctk.CTkOptionMenu(
+            self.toolbar, values=cfg.config.profile_names() + ["+ New profile…"],
+            variable=self.profile_var, width=150, height=34, corner_radius=8,
+            fg_color=ACCENT_SOFT, text_color=ACCENT, button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER, command=self.on_profile_change)
+        self.profile_menu.pack(side="left", padx=2)
         self.db_label = ctk.CTkLabel(self.toolbar, text=I.t("db_count", n=len(self.db.drugs)),
                                      text_color=MUTED)
         self.db_label.pack(side="right", padx=10)
@@ -386,7 +407,8 @@ class App(ctk.CTk):
     def build_forms(self):
         # Prescriber + Patient SIDE BY SIDE (compact)
         self.doctor_vars = {k: tk.StringVar() for k in ["name", "license_no", "specialty"]}
-        self.patient_vars = {k: tk.StringVar() for k in ["name", "age", "sex"]}
+        self.patient_vars = {k: tk.StringVar() for k in ["name", "age", "sex", "id_number", "allergies"]}
+        self.rx_vars = {k: tk.StringVar() for k in ["diagnosis", "refills"]}
 
         side = ctk.CTkFrame(self.scroll, fg_color="transparent")
         side.pack(fill="x", padx=4, pady=8)
@@ -402,6 +424,13 @@ class App(ctk.CTk):
         self.field(p, I.t("f_name"), self.patient_vars["name"], 220)
         self.field(p, I.t("age"), self.patient_vars["age"], 90)
         self.sex_field(p, I.t("sex"), self.patient_vars["sex"])
+        self.field(p, I.t("patient_id"), self.patient_vars["id_number"], 160)
+        self.field(p, I.t("allergies"), self.patient_vars["allergies"], 220,
+                   "None known / enter allergies")
+
+        details = self.section(self.scroll, I.t("clinical_details"))
+        self.field(details, I.t("diagnosis"), self.rx_vars["diagnosis"], 280, "optional")
+        self.field(details, I.t("refills"), self.rx_vars["refills"], 100, "optional")
 
         # Medications
         dr = self.section(self.scroll, I.t("medications"))
@@ -442,6 +471,8 @@ class App(ctk.CTk):
             v.set("")
         for v in self.patient_vars.values():
             v.set("")
+        for v in self.rx_vars.values():
+            v.set("")
         for r in list(self.rows):
             r.destroy()
         self.rows = []
@@ -454,8 +485,12 @@ class App(ctk.CTk):
         patient = qu.Patient(**{k: v.get().strip() for k, v in self.patient_vars.items()})
         drugs = [r.get_data() for r in self.rows if r.get_data().generic_name]
         rx_id = "RX-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        return qu.Prescription(doctor=doctor, patient=patient, drugs=drugs,
-                               date=datetime.datetime.now().strftime("%Y-%m-%d"), rx_id=rx_id)
+        clinic = qu.Clinic(**{k: v for k, v in cfg.config.get_clinic().items()
+                              if k in {"name", "address", "phone", "logo_path"}})
+        return qu.Prescription(clinic=clinic, doctor=doctor, patient=patient, drugs=drugs,
+                               date=datetime.datetime.now().strftime("%Y-%m-%d"), rx_id=rx_id,
+                               diagnosis=self.rx_vars["diagnosis"].get().strip(),
+                               refills=self.rx_vars["refills"].get().strip())
 
     def on_any_change(self, *a):
         pass
@@ -468,6 +503,20 @@ class App(ctk.CTk):
         I.set_lang(value)
         self.reload_texts()
 
+    def on_profile_change(self, value):
+        if value == "+ New profile…":
+            name = simpledialog.askstring(APP_TITLE, "New profile name:", parent=self)
+            if not name:
+                self.profile_var.set(cfg.config.get("active_profile", "Default"))
+                return
+            cfg.config.save_profile(name, {k: v.get().strip() for k, v in self.doctor_vars.items()})
+            self.profile_menu.configure(values=cfg.config.profile_names() + ["+ New profile…"])
+            self.profile_var.set(name)
+            return
+        doctor = cfg.config.use_profile(value)
+        for key, variable in self.doctor_vars.items():
+            variable.set(doctor.get(key, ""))
+
     def reload_texts(self):
         for child in list(self.children.values()):
             child.destroy()
@@ -476,7 +525,8 @@ class App(ctk.CTk):
 
     # -- profile -------------------------------------------------------------
     def save_profile(self):
-        cfg.config.set_doctor(**{k: v.get().strip() for k, v in self.doctor_vars.items()})
+        cfg.config.save_profile(self.profile_var.get(),
+                                {k: v.get().strip() for k, v in self.doctor_vars.items()})
         messagebox.showinfo(I.t("app_title"), I.t("msg_saved_profile"))
 
     def load_profile_into_ui(self):
@@ -488,9 +538,9 @@ class App(ctk.CTk):
     def import_db(self):
         path = filedialog.askopenfilename(
             title=I.t("import_db"),
-            filetypes=[("Drug database", "*.csv;*.xls;*.xlsx"),
+            filetypes=[("Drug database", "*.csv;*.xlsx"),
                        ("CSV files", "*.csv"),
-                       ("Excel files", "*.xls;*.xlsx"),
+                       ("Excel files", "*.xlsx"),
                        ("All files", "*.*")])
         if not path:
             return
@@ -520,14 +570,38 @@ class App(ctk.CTk):
 
     # -- output --------------------------------------------------------------
     def _qr(self, rx):
-        return qu.make_qr_image(qu.build_qr_url(rx))
+        try:
+            url = qu.build_qr_url(rx)
+            info = qu.qr_info(url)
+        except Exception as exc:
+            logging.exception("Could not create QR code")
+            messagebox.showerror(APP_TITLE, f"Could not create signed QR code:\n{exc}")
+            return None
+        if info["qr_version"] > 25:
+            answer = messagebox.askyesno(
+                APP_TITLE,
+                f"This QR is dense (version {info['qr_version']}). It may not scan reliably when printed. Continue?")
+            if not answer:
+                return None
+        return qu.make_qr_image(url)
+
+    def _validate(self, rx, action):
+        errors, warnings = qu.validate_prescription(rx)
+        if errors:
+            messagebox.showwarning(action, "Please correct the following:\n\n" + "\n".join(f"• {x}" for x in errors))
+            return False
+        if warnings and not messagebox.askyesno(action, "Warnings:\n\n" + "\n".join(
+                f"• {x}" for x in warnings) + "\n\nContinue?"):
+            return False
+        return True
 
     def _build_full(self, path_pdf=None, path_docx=None):
         rx = self.collect()
-        if not rx.drugs:
-            messagebox.showwarning(I.t("preview"), I.t("msg_no_drugs"))
+        if not self._validate(rx, I.t("preview")):
             return None
         qr = self._qr(rx)
+        if qr is None:
+            return None
         if path_pdf:
             pdfgen.generate_prescription_pdf(rx, path_pdf,
                                             paper_size=self.paper_var.get(), qr_pil_image=qr)
@@ -536,7 +610,7 @@ class App(ctk.CTk):
         return rx
 
     def preview(self):
-        path = os.path.join(tempfile.gettempdir(), "rx_preview.pdf")
+        path = os.path.join(tempfile.gettempdir(), f"rx_preview_{uuid.uuid4().hex}.pdf")
         if not self._build_full(path_pdf=path):
             return
         try:
@@ -545,7 +619,7 @@ class App(ctk.CTk):
             webbrowser.open(path)
 
     def print_pdf(self):
-        path = os.path.join(tempfile.gettempdir(), "rx_print.pdf")
+        path = os.path.join(tempfile.gettempdir(), f"rx_print_{uuid.uuid4().hex}.pdf")
         if not self._build_full(path_pdf=path):
             return
         try:
@@ -569,8 +643,7 @@ class App(ctk.CTk):
 
     def export_label(self):
         rx = self.collect()
-        if not rx.drugs:
-            messagebox.showwarning(I.t("export_compact"), I.t("msg_no_drugs"))
+        if not self._validate(rx, I.t("export_compact")):
             return
         path = filedialog.asksaveasfilename(
             title=I.t("export_compact"), defaultextension=".docx",
@@ -578,6 +651,8 @@ class App(ctk.CTk):
         if not path:
             return
         qr = self._qr(rx)
+        if qr is None:
+            return
         pdfgen.generate_medication_label_docx(rx, path, qr_pil_image=qr)
         messagebox.showinfo(I.t("export_compact"), I.t("msg_exported_compact", path=path))
         try:
@@ -594,7 +669,7 @@ class SettingsWindow(ctk.CTkToplevel):
         super().__init__(master)
         self.master = master
         self.title(I.t("set_title"))
-        self.geometry("540x280")
+        self.geometry("620x650")
         self.transient(master)
         self.grab_set()
 
@@ -605,19 +680,71 @@ class SettingsWindow(ctk.CTkToplevel):
                      height=32, corner_radius=8, border_color=LINE).pack(padx=16, fill="x")
         ctk.CTkLabel(self, text=I.t("set_tip"), text_color="#777", anchor="w").pack(
             fill="x", padx=16, pady=6)
+        clinic = cfg.config.get_clinic()
+        ctk.CTkLabel(self, text="Clinic name:", anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+        self.clinic_name_var = tk.StringVar(value=clinic.get("name", ""))
+        ctk.CTkEntry(self, textvariable=self.clinic_name_var, height=32, corner_radius=8,
+                     border_color=LINE).pack(padx=16, fill="x")
+        ctk.CTkLabel(self, text="Clinic address:", anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+        self.clinic_address_var = tk.StringVar(value=clinic.get("address", ""))
+        ctk.CTkEntry(self, textvariable=self.clinic_address_var, height=32, corner_radius=8,
+                     border_color=LINE).pack(padx=16, fill="x")
+        ctk.CTkLabel(self, text="Clinic phone:", anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+        self.clinic_phone_var = tk.StringVar(value=clinic.get("phone", ""))
+        ctk.CTkEntry(self, textvariable=self.clinic_phone_var, height=32, corner_radius=8,
+                     border_color=LINE).pack(padx=16, fill="x")
+        ctk.CTkLabel(self, text="Clinic logo (optional PNG/JPG):", anchor="w").pack(
+            fill="x", padx=16, pady=(8, 2))
+        logo_row = ctk.CTkFrame(self, fg_color="transparent")
+        logo_row.pack(fill="x", padx=16)
+        self.logo_var = tk.StringVar(value=clinic.get("logo_path", ""))
+        ctk.CTkEntry(logo_row, textvariable=self.logo_var, height=32, corner_radius=8,
+                     border_color=LINE).pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(logo_row, text="Browse…", width=88, command=self.choose_logo).pack(
+            side="left", padx=(8, 0))
         ctk.CTkLabel(self, text=I.t("set_db_path"), anchor="w").pack(
             fill="x", padx=16, pady=(8, 2))
         ctk.CTkLabel(self, text=str(self.master.db.path), anchor="w").pack(fill="x", padx=16)
         ctk.CTkButton(self, text=I.t("set_open"), width=200,
                       command=lambda: webbrowser.open(
-                          Path(__file__).resolve().parent / "viewer.html")).pack(pady=12)
+                          cfg.PROJECT_DIR / "viewer.html")).pack(pady=12)
+        ctk.CTkButton(self, text="Copy QR verification key", width=220,
+                      command=self.copy_verification_key).pack(pady=(0, 4))
         ctk.CTkButton(self, text=I.t("set_save"), fg_color=GOOD, hover_color=GOOD_HOVER,
                       command=self.save).pack(pady=4)
 
     def save(self):
-        cfg.config.viewer_base_url = self.viewer_var.get().strip().rstrip("/")
+        try:
+            cfg.config.set_clinic(name=self.clinic_name_var.get().strip(),
+                                  address=self.clinic_address_var.get().strip(),
+                                  phone=self.clinic_phone_var.get().strip(),
+                                  logo_path=self.logo_var.get().strip())
+            cfg.config.viewer_base_url = self.viewer_var.get().strip().rstrip("/")
+        except Exception as exc:
+            logging.exception("Could not save clinic settings")
+            messagebox.showerror(I.t("set_title"), f"Settings could not be saved:\n{exc}")
+            return
         self.destroy()
-        messagebox.showinfo(I.t("set_title"), I.t("msg_settings_saved"))
+        messagebox.showinfo(I.t("set_title"), "Clinic settings saved.")
+
+    def copy_verification_key(self):
+        import json
+        try:
+            key = json.dumps(qu.verification_key(), separators=(",", ":"))
+            self.clipboard_clear()
+            self.clipboard_append(key)
+            messagebox.showinfo(APP_TITLE,
+                "Verification key copied. Add it to TRUSTED_SIGNERS in the static viewer before relying on QR verification.")
+        except Exception as exc:
+            logging.exception("Could not export verification key")
+            messagebox.showerror(APP_TITLE, str(exc))
+
+    def choose_logo(self):
+        path = filedialog.askopenfilename(title="Clinic logo",
+                                          filetypes=[("Images", "*.png;*.jpg;*.jpeg"),
+                                                     ("All files", "*.*")])
+        if path:
+            self.logo_var.set(path)
 
 
 if __name__ == "__main__":

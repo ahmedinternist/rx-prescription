@@ -12,6 +12,29 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Build the Windows executable
+```powershell
+powershell -ExecutionPolicy Bypass -File build_exe.ps1
+```
+The output is `dist/RxPrescription.exe`. Building requires a full Windows
+Python installation with Tcl/Tk; the script stops early if Tk cannot open.
+
+## Safety, privacy, and QR verification
+- The application does **not** store patient prescriptions or history. It stores
+  clinic/doctor preferences and its signing key using Windows DPAPI, tied to the
+  current Windows account.
+- Prescription fields are validated before export. Duplicate medicines and
+  overly dense QR codes require an explicit confirmation.
+- New QR payloads are signed with an ES256 clinic-local key. To display
+  **Verified** in the static viewer, copy the public key from Settings and add
+  it to `TRUSTED_SIGNERS` in the deployed `viewer.html`. Until that step, a
+  signature is correctly shown as unregistered rather than verified.
+- A QR embeds the prescription data. Anyone who obtains the printed QR can
+  decode it; it is not suitable for confidential record storage or revocation.
+- This project is a document-generation tool, not clinical decision support.
+  Drug interactions, contraindications, and local prescribing rules must be
+  supplied by an approved clinical data source and governance process.
+
 ## Features
 - **Bilingual UI + documents** — switch English / Arabic from the toolbar; the
   app, the PDF, the Word file, and Arabic text shaping all follow.

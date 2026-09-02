@@ -1,4 +1,4 @@
-"""Drug database backed by a CSV or Excel (XLS/XLSX) file.
+"""Drug database backed by a CSV or Excel (.xlsx) file.
 
 The doctor can import/replace the database from any CSV or Excel source (e.g.
 exported from another system, a national formulary). The only REQUIRED column
@@ -79,10 +79,12 @@ def _resolve_columns(header: List[str]) -> Dict[str, str]:
 # File reading helpers (module level) — support CSV and Excel.
 # ---------------------------------------------------------------------------
 def _read_rows(path: Path) -> List[Dict[str, str]]:
-    """Read any supported file (CSV / XLS / XLSX) into canonical-field dicts."""
+    """Read any supported file (CSV / XLSX) into canonical-field dicts."""
     suffix = path.suffix.lower()
-    if suffix in (".xls", ".xlsx"):
+    if suffix == ".xlsx":
         return _read_xlsx(path)
+    if suffix == ".xls":
+        raise ValueError("Legacy .xls is not supported. Save the file as .xlsx or CSV first.")
     return _read_csv(path)
 
 

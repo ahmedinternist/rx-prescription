@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -82,6 +83,11 @@ def ar(text: str) -> str:
     return text
 
 
+def safe(text: str) -> str:
+    """Escape user-entered data before it is interpolated into ReportLab markup."""
+    return ar(escape(text or ""))
+
+
 def _t(key, **kw):
     return ar(I.t(key, **kw))
 
@@ -124,6 +130,80 @@ def _styles(scale: float):
     return locals()
 
 
+def _generate_modern_prescription_pdf(rx: Prescription, output_path: str, paper_size: str,
+                                      qr_pil_image=None) -> str:
+    """Clean Arabic-first layout used by Preview and Print."""
+    if paper_size not in PAGE_MAP:
+        paper_size = "A4"
+    scale = SCALE.get(paper_size, 1.0)
+    margin = 16 * mm * scale
+    doc = BaseDocTemplate(str(output_path), pagesize=PAGE_MAP[paper_size], leftMargin=margin,
+                          rightMargin=margin, topMargin=margin, bottomMargin=margin)
+    doc.addPageTemplates([PageTemplate(id="main", frames=[Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")])])
+    teal, ink, muted, soft, line = (colors.HexColor("#007f79"), colors.HexColor("#073b3a"),
+                                    colors.HexColor("#4f7f80"), colors.HexColor("#f0fbfa"), colors.HexColor("#bff3ec"))
+    align = TA_RIGHT if I.get_lang() == "ar" else TA_LEFT
+    base = ParagraphStyle("ModernBase", fontName=_FONT_NAME, fontSize=11 * scale, leading=15 * scale, textColor=ink, alignment=align)
+    clinic = ParagraphStyle("ModernClinic", parent=base, fontName=_FONT_BOLD, fontSize=19 * scale, leading=24 * scale)
+    doctor = ParagraphStyle("ModernDoctor", parent=base, fontName=_FONT_BOLD, fontSize=15 * scale, leading=20 * scale)
+    medicine = ParagraphStyle("ModernMedicine", parent=base, fontName=_FONT_BOLD, fontSize=15 * scale, leading=20 * scale)
+    small = ParagraphStyle("ModernSmall", parent=base, fontSize=8.5 * scale, leading=12 * scale, textColor=muted)
+    story = []
+    mark = Paragraph("<font size=28 color='#007f79'><b>Rx</b></font>", ParagraphStyle("RxMark", parent=base, alignment=TA_LEFT))
+    if rx.clinic.logo_path and Path(rx.clinic.logo_path).is_file():
+        from reportlab.platypus import Image as RLImage
+        mark = RLImage(rx.clinic.logo_path, width=22 * mm * scale, height=15 * mm * scale)
+    header_lines = [Paragraph(safe(rx.clinic.name or "Prescription"), clinic)]
+    if rx.doctor.specialty:
+        header_lines.append(Paragraph(safe(rx.doctor.specialty), ParagraphStyle("Specialty", parent=base, fontSize=12 * scale, textColor=muted)))
+    if rx.clinic.address or rx.clinic.phone:
+        header_lines.append(Paragraph(safe("  |  ".join(x for x in [rx.clinic.address, rx.clinic.phone] if x)), small))
+    header = Table([[mark, header_lines]], colWidths=[doc.width * .23, doc.width * .77])
+    header.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("ALIGN", (1,0), (1,0), "RIGHT"), ("BOTTOMPADDING", (0,0), (-1,-1), 7 * scale)]))
+    story += [header, Table([[""]], colWidths=[doc.width], style=TableStyle([("LINEABOVE", (0,0), (-1,-1), 1.1, line)])), Spacer(1, 8 * mm * scale)]
+    date = Paragraph(f"{_t('pdf_date')} {safe(rx.date)}", small)
+    doc_lines = [Paragraph(safe(rx.doctor.name), doctor)]
+    if rx.doctor.license_no:
+        doc_lines.append(Paragraph(f"{_t('license')}: {safe(rx.doctor.license_no)}", small))
+    info = Table([[date, doc_lines]], colWidths=[doc.width*.38, doc.width*.62])
+    info.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("ALIGN", (1,0), (1,0), "RIGHT"), ("BOTTOMPADDING", (0,0), (-1,-1), 8 * scale)]))
+    story.append(info)
+    # The modern preview already groups patient details in a dedicated panel.
+    # Show the name only so it is not repeated as "Patient: Patient Name".
+    patient_lines = [f"<b>{safe(rx.patient.name or '—')}</b>"]
+    if rx.patient.age: patient_lines.append(f"{_t('age')}: {safe(rx.patient.age)}")
+    if rx.diagnosis: patient_lines.append(f"<b>{safe(I.t('diagnosis'))}:</b> {safe(rx.diagnosis)}")
+    if rx.patient.allergies: patient_lines.append(f"<b>{safe(I.t('allergies'))}:</b> {safe(rx.patient.allergies)}")
+    patient = Table([[Paragraph("<br/>".join(patient_lines), base)]], colWidths=[doc.width])
+    patient.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), soft), ("ROUNDEDCORNERS", [15,15,15,15]), ("TOPPADDING", (0,0), (-1,-1), 11*scale), ("BOTTOMPADDING", (0,0), (-1,-1), 11*scale), ("LEFTPADDING", (0,0), (-1,-1), 13*scale), ("RIGHTPADDING", (0,0), (-1,-1), 13*scale)]))
+    story += [patient, Spacer(1, 8 * mm * scale)]
+    for number, drug_item in enumerate(rx.drugs, 1):
+        title = safe(drug_item.generic_name or "—") + (f" ({safe(drug_item.brand_name)})" if drug_item.brand_name else "")
+        # A medication with no prescribed schedule should be displayed as a
+        # name only.  Free-form notes must not create an otherwise empty
+        # dosage/frequency/duration line in the preview.
+        details = " - ".join(
+            safe(x)
+            for x in [drug_item.dosage, drug_item.frequency, drug_item.duration]
+            if x
+        )
+        body = [Paragraph(title, medicine)] + ([Paragraph(details, base)] if details else [])
+        pill = Paragraph(f"<b>{number}</b>", ParagraphStyle("Pill", parent=medicine, alignment=TA_CENTER, textColor=teal, fontSize=13*scale))
+        row = Table([[pill, body]], colWidths=[12*mm*scale, doc.width-12*mm*scale])
+        row.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,0), (0,0), colors.HexColor("#c9f8f1")), ("TOPPADDING", (0,0), (-1,-1), 5*scale), ("BOTTOMPADDING", (0,0), (-1,-1), 8*scale)]))
+        story.append(row)
+    story += [Spacer(1, 10*mm*scale), Table([[""]], colWidths=[doc.width], style=TableStyle([("LINEABOVE", (0,0), (-1,-1), 1.1, line)])), Spacer(1, 6*mm*scale)]
+    if qr_pil_image:
+        from reportlab.platypus import Image as RLImage
+        qr = RLImage(_qr_path(qr_pil_image), width=42*mm*scale, height=42*mm*scale)
+        caption = Paragraph("Scan", base)
+        footer = Table([[caption, qr]], colWidths=[doc.width*.58, doc.width*.42])
+        footer.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "MIDDLE"), ("ALIGN", (1,0), (1,0), "RIGHT"), ("BOX", (1,0), (1,0), .8, line), ("TOPPADDING", (1,0), (1,0), 5*scale), ("BOTTOMPADDING", (1,0), (1,0), 5*scale)]))
+        story.append(footer)
+    doc.build(story)
+    return str(output_path)
+
+
 def _qr_path(qr_pil_image) -> Optional[str]:
     if qr_pil_image is None:
         return None
@@ -132,6 +212,29 @@ def _qr_path(qr_pil_image) -> Optional[str]:
     _tmp.close()
     qr_pil_image.save(_tmp.name)
     return _tmp.name
+
+
+def _apply_docx_language(doc) -> None:
+    """Mark Word paragraphs RTL when Arabic is selected (PDF already shapes RTL)."""
+    if I.get_lang() != "ar":
+        return
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    paragraphs = list(doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                paragraphs.extend(cell.paragraphs)
+    for paragraph in paragraphs:
+        p_pr = paragraph._p.get_or_add_pPr()
+        bidi = OxmlElement("w:bidi")
+        bidi.set(qn("w:val"), "1")
+        p_pr.append(bidi)
+        for run in paragraph.runs:
+            r_pr = run._r.get_or_add_rPr()
+            rtl = OxmlElement("w:rtl")
+            rtl.set(qn("w:val"), "1")
+            r_pr.append(rtl)
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +246,7 @@ def generate_prescription_pdf(
     paper_size: str = "A4",
     qr_pil_image=None,
 ) -> str:
+    return _generate_modern_prescription_pdf(rx, output_path, paper_size, qr_pil_image)
     if paper_size not in PAGE_MAP:
         paper_size = "A4"
     page = PAGE_MAP[paper_size]
@@ -157,28 +261,46 @@ def generate_prescription_pdf(
     doc.addPageTemplates([PageTemplate(id="main", frames=[frame])])
 
     story = []
+    if rx.clinic.logo_path and Path(rx.clinic.logo_path).is_file():
+        from reportlab.platypus import Image as RLImage
+        story.append(RLImage(rx.clinic.logo_path, width=28 * mm * scale, height=18 * mm * scale))
+    if rx.clinic.name:
+        story.append(Paragraph(f"<b>{safe(rx.clinic.name)}</b>", s["title"]))
+        clinic_bits = [safe(rx.clinic.address), safe(rx.clinic.phone)]
+        clinic_line = "  |  ".join(bit for bit in clinic_bits if bit)
+        if clinic_line:
+            story.append(Paragraph(clinic_line, s["small"]))
+        story.append(Spacer(1, 3 * mm * scale))
     story.append(Paragraph(ar(I.t("pdf_title")), s["title"]))
     story.append(Paragraph(_t("pdf_subtitle"), s["sub"]))
     story.append(Spacer(1, 4 * mm * scale))
 
     # doctor / patient
     left = [Paragraph(_t("pdf_prescriber"), s["h"]),
-            Paragraph(f"<b>{ar(rx.doctor.name or '—')}</b>", s["cell"])]
+            Paragraph(f"<b>{safe(rx.doctor.name or '—')}</b>", s["cell"])]
     if rx.doctor.specialty:
-        left.append(Paragraph(f"{_t('specialty')}: {ar(rx.doctor.specialty)}", s["cell"]))
+        left.append(Paragraph(f"{_t('specialty')}: {safe(rx.doctor.specialty)}", s["cell"]))
     if rx.doctor.license_no:
-        left.append(Paragraph(f"{_t('license')}: {ar(rx.doctor.license_no)}", s["cell"]))
+        left.append(Paragraph(f"{_t('license')}: {safe(rx.doctor.license_no)}", s["cell"]))
 
     right = [Paragraph(_t("pdf_patient"), s["h"]),
-             Paragraph(f"<b>{ar(rx.patient.name or '—')}</b>", s["cell"])]
+             Paragraph(f"<b>{safe(rx.patient.name or '—')}</b>", s["cell"])]
     pat = []
     if rx.patient.sex:
-        pat.append(f"{_t('sex')}: {ar(rx.patient.sex)}")
+        pat.append(f"{_t('sex')}: {safe(rx.patient.sex)}")
     if rx.patient.age:
-        pat.append(f"{_t('age')}: {ar(rx.patient.age)}")
+        pat.append(f"{_t('age')}: {safe(rx.patient.age)}")
+    if rx.patient.id_number:
+        pat.append(f"ID: {safe(rx.patient.id_number)}")
     if pat:
         right.append(Paragraph("  |  ".join(pat), s["cell"]))
     right.append(Paragraph(f"{_t('pdf_date')} {rx.date or '—'}", s["cell"]))
+    if rx.patient.allergies:
+        right.append(Paragraph(f"Allergies: {safe(rx.patient.allergies)}", s["cell"]))
+    if rx.diagnosis:
+        right.append(Paragraph(f"Diagnosis: {safe(rx.diagnosis)}", s["cell"]))
+    if rx.refills:
+        right.append(Paragraph(f"Refills: {safe(rx.refills)}", s["cell"]))
     if rx.rx_id:
         right.append(Paragraph(f"{_t('pdf_rx')} {rx.rx_id}", s["cell"]))
 
@@ -201,15 +323,15 @@ def generate_prescription_pdf(
               Paragraph(_t("pdf_col_notes"), s["cellb"])]
     data = [header]
     for i, d in enumerate(rx.drugs, 1):
-        drug_txt = f"<b>{ar(d.generic_name or '—')}</b>"
+        drug_txt = f"<b>{safe(d.generic_name or '—')}</b>"
         if d.brand_name:
-            drug_txt += f"<br/><font size=7 color='#5b6b85'>{ar(d.brand_name)}</font>"
+            drug_txt += f"<br/><font size=7 color='#5b6b85'>{safe(d.brand_name)}</font>"
         data.append([Paragraph(str(i), s["cell"]),
                      Paragraph(drug_txt, s["cell"]),
-                     Paragraph(ar(d.dosage or ""), s["cell"]),
-                     Paragraph(ar(d.frequency or ""), s["cell"]),
-                     Paragraph(ar(d.duration or ""), s["cell"]),
-                     Paragraph(ar(d.notes or ""), s["cell"])])
+                     Paragraph(safe(d.dosage), s["cell"]),
+                     Paragraph(safe(d.frequency), s["cell"]),
+                     Paragraph(safe(d.duration), s["cell"]),
+                     Paragraph(safe(d.notes), s["cell"])])
     cw = [doc.width * x for x in (0.05, 0.30, 0.15, 0.17, 0.15, 0.18)]
     drug_tbl = Table(data, colWidths=cw, repeatRows=1)
     drug_tbl.setStyle(TableStyle([
@@ -228,9 +350,9 @@ def generate_prescription_pdf(
     # footer: signature + QR
     footer_left = [Paragraph(_t("pdf_signature"), s["h"]),
                    Spacer(1, 12 * mm * scale),
-                   Paragraph(f"<b>{ar(rx.doctor.name or '')}</b>", s["cell"])]
+                   Paragraph(f"<b>{safe(rx.doctor.name)}</b>", s["cell"])]
     if rx.doctor.license_no:
-        footer_left.append(Paragraph(f"{_t('license')}: {ar(rx.doctor.license_no)}", s["cell"]))
+        footer_left.append(Paragraph(f"{_t('license')}: {safe(rx.doctor.license_no)}", s["cell"]))
 
     footer_right = []
     qp = _qr_path(qr_pil_image)
@@ -341,6 +463,7 @@ def generate_medication_label_docx(rx: Prescription, output_path: str,
         cr.font.size = Pt(8)
         cr.font.color.rgb = muted
 
+    _apply_docx_language(doc)
     doc.save(str(output_path))
     return str(output_path)
 
@@ -364,7 +487,19 @@ def generate_prescription_docx(rx: Prescription, output_path: str,
     style.font.name = "Calibri"
     style.font.size = Pt(10)
 
-    # Title
+    # Clinic identity and title
+    if rx.clinic.logo_path and Path(rx.clinic.logo_path).is_file():
+        logo = doc.add_paragraph()
+        logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        logo.add_run().add_picture(rx.clinic.logo_path, width=Inches(0.9))
+    if rx.clinic.name:
+        clinic_title = doc.add_paragraph()
+        clinic_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        clinic_title.add_run(rx.clinic.name).bold = True
+        clinic_bits = [rx.clinic.address, rx.clinic.phone]
+        if any(clinic_bits):
+            clinic_line = doc.add_paragraph("  |  ".join(x for x in clinic_bits if x))
+            clinic_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
     t = doc.add_paragraph()
     t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = t.add_run(I.t("pdf_title"))
@@ -400,6 +535,14 @@ def generate_prescription_docx(rx: Prescription, output_path: str,
         pat_bits.append(f"{I.t('age')}: {rx.patient.age}")
     if pat_bits:
         labelled("", "   |   ".join(pat_bits))
+    if rx.patient.id_number:
+        labelled("Patient ID:", rx.patient.id_number)
+    if rx.patient.allergies:
+        labelled("Allergies:", rx.patient.allergies)
+    if rx.diagnosis:
+        labelled("Diagnosis:", rx.diagnosis)
+    if rx.refills:
+        labelled("Refills:", rx.refills)
     labelled(I.t("pdf_date"), rx.date or "—")
     if rx.rx_id:
         labelled(I.t("pdf_rx"), rx.rx_id)
@@ -450,5 +593,6 @@ def generate_prescription_docx(rx: Prescription, output_path: str,
         cr.font.size = Pt(8)
         cr.font.color.rgb = muted
 
+    _apply_docx_language(doc)
     doc.save(str(output_path))
     return str(output_path)

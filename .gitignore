@@ -43,6 +43,8 @@ Thumbs.db
 _*.txt
 _*.mjs
 live_viewer.html
+.render-data/
+output/
 
 # Data files that are not the seed DB
 data/*.xlsx

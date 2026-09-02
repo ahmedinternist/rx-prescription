@@ -21,6 +21,7 @@
   .kv { display:flex; flex-wrap:wrap; gap:6px 24px; font-size:14px; }
   .kv div { min-width:140px; }
   .kv span { color:#666; display:block; font-size:11px; text-transform:uppercase; }
+  .identity { font-size:16px; font-weight:650; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
   th { background:#f0f4fc; color:var(--ink); font-size:11px; text-transform:uppercase; }
@@ -29,6 +30,10 @@
   .empty { padding:40px; text-align:center; color:#888; }
   .foot { padding:16px 24px; font-size:11px; color:#888; text-align:center; }
   .rxid { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; }
+  .notice { margin:14px 24px 0; padding:10px 12px; border-radius:8px; font-size:12px; }
+  .notice.ok { background:#e8f7ef; color:#17633d; }
+  .notice.warn { background:#fff4df; color:#775100; }
+  .notice.bad { background:#fdecec; color:#9b2424; }
 </style>
 </head>
 <body>
@@ -50,6 +55,12 @@
 </div>
 
 <script>
+// Register each clinic's public JWK here before deploying this file. Do not
+// trust a public key supplied by the QR itself: an attacker could replace both
+// that key and the prescription. Example:
+// const TRUSTED_SIGNERS = { "0123abcd...": {kty:"EC", crv:"P-256", x:"...", y:"..."} };
+const TRUSTED_SIGNERS = {};
+
 // ---- decoders (mirror of the desktop app) ----
 function b64urlToBytes(s){
   s = s.replace(/-/g,'+').replace(/_/g,'/');
@@ -66,7 +77,7 @@ async function decode(){
   try{
     // Try plain JSON first (uncompressed payload).
     const json = JSON.parse(atob(hash.replace(/-/g,'+').replace(/_/g,'/')));
-    render(json);
+    await render(json);
     return;
   }catch(e){ /* fall through to compressed */ }
   try{
@@ -75,7 +86,7 @@ async function decode(){
     const ds = new DecompressionStream('deflate');  // zlib-wrapped, matches Python zlib.compress
     const stream = new Blob([bytes]).stream().pipeThrough(ds);
     const text = await new Response(stream).text();
-    render(JSON.parse(text));
+    await render(JSON.parse(text));
   }catch(e2){
     showEmpty('Could not decode this prescription. The link may be incomplete.\n'+e2);
   }
@@ -85,7 +96,31 @@ function kv(list){
   return '<div class="kv">'+list.filter(Boolean).map(o=>
     `<div><span>${esc(o.l)}</span>${esc(o.v)}</div>`).join('')+'</div>';
 }
-function render(p){
+function canonical(value){
+  if(Array.isArray(value)) return '['+value.map(canonical).join(',')+']';
+  if(value && typeof value === 'object') return '{'+Object.keys(value).sort().map(k=>
+    JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';
+  return JSON.stringify(value);
+}
+function b64urlBytes(value){ return b64urlToBytes(value); }
+async function signatureStatus(p){
+  const sig = p.sig;
+  if(!sig) return {kind:'warn', text:'Unsigned prescription — do not treat this page as proof of authenticity.'};
+  const key = TRUSTED_SIGNERS[sig.kid];
+  if(!key) return {kind:'warn', text:'Signed prescription, but this clinic key is not registered on this viewer.'};
+  if(sig.alg !== 'ES256') return {kind:'bad', text:'Unsupported prescription signature.'};
+  try {
+    const unsigned = {...p}; delete unsigned.sig;
+    const publicKey = await crypto.subtle.importKey('jwk', key, {name:'ECDSA', namedCurve:'P-256'}, false, ['verify']);
+    const valid = await crypto.subtle.verify({name:'ECDSA', hash:'SHA-256'}, publicKey,
+      b64urlBytes(sig.value), new TextEncoder().encode(canonical(unsigned)));
+    return valid ? {kind:'ok', text:'Verified prescription signature.'} :
+      {kind:'bad', text:'Invalid signature — do not dispense from this page.'};
+  } catch (_) {
+    return {kind:'bad', text:'Signature could not be verified — do not dispense from this page.'};
+  }
+}
+async function render(p){
   const c = p.clinic||{}, d = p.doctor||{}, pat = p.patient||{};
   // Clinic line removed from the app; only show if a payload happens to include one.
   if(c.name){
@@ -98,32 +133,44 @@ function render(p){
   }
 
   const docBits=[];
-  if(d.name) docBits.push({l:'Prescriber', v:d.name});
   if(d.specialty) docBits.push({l:'Specialty', v:d.specialty});
   if(d.license_no) docBits.push({l:'License No.', v:d.license_no});
   if(d.phone) docBits.push({l:'Phone', v:d.phone});
 
   const patBits=[];
-  if(pat.name) patBits.push({l:'Patient', v:pat.name});
   if(pat.sex) patBits.push({l:'Sex', v:pat.sex});
   if(pat.age) patBits.push({l:'Age', v:pat.age});
   if(pat.id_number) patBits.push({l:'ID', v:pat.id_number});
+  if(pat.allergies) patBits.push({l:'Allergies', v:pat.allergies});
 
-  let html = '';
-  html += `<div class="section"><h2>Prescriber</h2>${kv(docBits)}</div>`;
-  html += `<div class="section"><h2>Patient</h2>${kv(patBits)}`+
+  const status = await signatureStatus(p);
+  let html = `<div class="notice ${status.kind}">${esc(status.text)}</div>`;
+  html += `<div class="section"><h2>Prescriber</h2>`+
+          (d.name?`<div class="identity">${esc(d.name)}</div>`:'')+kv(docBits)+`</div>`;
+  html += `<div class="section"><h2>Patient</h2>`+
+          (pat.name?`<div class="identity">${esc(pat.name)}</div>`:'')+kv(patBits)+
           (p.date?`<div class="rxid" style="margin-top:8px">Date: ${esc(p.date)}</div>`:'')+
           (p.rx_id?`<div class="rxid">Rx No: ${esc(p.rx_id)}</div>`:'')+`</div>`;
+  if(p.diagnosis || p.refills){
+    html += `<div class="section"><h2>Clinical details</h2>${kv([
+      p.diagnosis?{l:'Diagnosis',v:p.diagnosis}:null,
+      p.refills?{l:'Refills',v:p.refills}:null])}</div>`;
+  }
 
   html += '<div class="section"><h2>Medications</h2>';
   const drugs = p.drugs||[];
   if(drugs.length){
-    html += '<table><thead><tr><th>#</th><th>Drug</th><th>Dosage</th><th>Frequency</th>'+
-            '<th>Duration</th><th>Notes</th></tr></thead><tbody>';
+    const medicationColumns = [
+      ['dosage', 'Dosage'], ['frequency', 'Frequency'],
+      ['duration', 'Duration'], ['notes', 'Notes']
+    ].filter(([key]) => drugs.some(m => String(m[key] || '').trim()));
+    html += '<table><thead><tr><th>#</th><th>Drug</th>'+
+            medicationColumns.map(([, label]) => `<th>${label}</th>`).join('')+
+            '</tr></thead><tbody>';
     drugs.forEach((m,i)=>{
-      const name = (m.generic_name||'') + (m.brand_name?` <span class="badge">${esc(m.brand_name)}</span>`:'');
-      html += `<tr><td>${i+1}</td><td>${name}</td><td>${esc(m.dosage)}</td>`+
-              `<td>${esc(m.frequency)}</td><td>${esc(m.duration)}</td><td>${esc(m.notes)}</td></tr>`;
+      const name = esc(m.generic_name||'') + (m.brand_name?` <span class="badge">${esc(m.brand_name)}</span>`:'');
+      html += `<tr><td>${i+1}</td><td>${name}</td>`+
+              medicationColumns.map(([key]) => `<td>${esc(m[key])}</td>`).join('')+'</tr>';
     });
     html += '</tbody></table>';
   } else {
