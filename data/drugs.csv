@@ -1,28 +1,28 @@
-generic_name,brand_name,strength,form,category,notes
-Amoxicillin,Amoxil,500 mg,capsule,antibiotic,Take with food
-Amoxicillin/Clavulanate,Augmentin,625 mg,tablet,antibiotic,
-Azithromycin,Zithromax,500 mg,tablet,antibiotic,Single daily dose
-Ibuprofen,Brufen,400 mg,tablet,NSAID,Take after meals
-Paracetamol,Panadol,500 mg,tablet,analgesic,Max 4g per day
-Omeprazole,Losec,20 mg,capsule,PPI,
-Cetirizine,Zyrtec,10 mg,tablet,antihistamine,
-Metformin,Glucophage,500 mg,tablet,antidiabetic,
-Amlodipine,Norvasc,5 mg,tablet,antihypertensive,
-Salbutamol,Ventolin,100 mcg,inhaler,bronchodilator,
-Prednisolone,Deltasone,5 mg,tablet,corticosteroid,
-Ciprofloxacin,Cipro,500 mg,tablet,antibiotic,
-Diclofenac,Voltaren,50 mg,tablet,NSAID,
-Loratadine,Claritin,10 mg,tablet,antihistamine,
-Levothyroxine,Synthroid,50 mcg,tablet,hormone,Take on empty stomach
-Insulin glargine,Lantus,100 IU/ml,injection,antidiabetic,
-Ceftriaxone,Rocephin,1 g,injection,antibiotic,
-Ondansetron,Zofran,4 mg,tablet,antiemetic,
-Vitamin D3,Colecalciferol,1000 IU,tablet,vitamin,
-Ferrous sulfate,Feosol,325 mg,tablet,iron supplement,Take with vitamin C
-Captopril,Capoten,25 mg,tablet,ACE inhibitor,
-Losartan,Cozaar,50 mg,tablet,ARB,
-Atorvastatin,Lipitor,20 mg,tablet,statin,
-Aspirin,Aspro,75 mg,tablet,antiplatelet,
-Metronidazole,Flagyl,500 mg,tablet,antiprotozoal,
-Diazepam,Valium,5 mg,tablet,benzodiazepine,
-Furosemide,Lasix,40 mg,tablet,diuretic,
+generic_name,brand_name,strength,form,category,therapeutic_group,detailed_class,notes
+Amoxicillin,Amoxil,500 mg,capsule,antibiotic,antiinfectives,Aminopenicillins & Beta-Lactamase Inhibitors,Take with food
+Amoxicillin/Clavulanate,Augmentin,625 mg,tablet,antibiotic,antiinfectives,Aminopenicillins & Beta-Lactamase Inhibitors,
+Azithromycin,Zithromax,500 mg,tablet,antibiotic,antiinfectives,Macrolides & Ketolides,Single daily dose
+Ibuprofen,Brufen,400 mg,tablet,NSAID,pain_musculoskeletal,NSAID: Non-Selective,Take after meals
+Paracetamol,Panadol,500 mg,tablet,analgesic,pain_musculoskeletal,Analgesic & Antipyretic (Non-Opioid),Max 4g per day
+Omeprazole,Losec,20 mg,capsule,PPI,gastrointestinal,PPI (Proton Pump Inhibitor),
+Cetirizine,Zyrtec,10 mg,tablet,antihistamine,respiratory_allergy_ent,Antihistamines: 2nd Generation (Non-Sedating),
+Metformin,Glucophage,500 mg,tablet,antidiabetic,endocrine_nutrition,Antidiabetic: Biguanides,
+Amlodipine,Norvasc,5 mg,tablet,antihypertensive,cardiovascular_blood,CCB: Dihydropyridine (Peripheral Vasodilator),
+Salbutamol,Ventolin,100 mcg,inhaler,bronchodilator,respiratory_allergy_ent,SABA (Short-Acting Beta-2 Agonist),
+Prednisolone,Deltasone,5 mg,tablet,corticosteroid,endocrine_nutrition,Systemic Glucocorticoids,
+Ciprofloxacin,Cipro,500 mg,tablet,antibiotic,antiinfectives,Fluoroquinolones,
+Diclofenac,Voltaren,50 mg,tablet,NSAID,pain_musculoskeletal,NSAID: Non-Selective,
+Loratadine,Claritin,10 mg,tablet,antihistamine,respiratory_allergy_ent,Antihistamines: 2nd Generation (Non-Sedating),
+Levothyroxine,Synthroid,50 mcg,tablet,hormone,endocrine_nutrition,Thyroid Replacement Hormone,Take on empty stomach
+Insulin glargine,Lantus,100 IU/ml,injection,antidiabetic,endocrine_nutrition,Insulin: Intermediate & Long-Acting (Basal),
+Ceftriaxone,Rocephin,1 g,injection,antibiotic,antiinfectives,Cephalosporins: 3rd & 4th Generation,
+Ondansetron,Zofran,4 mg,tablet,antiemetic,gastrointestinal,Antiemetic & Prokinetic,
+Vitamin D3,Colecalciferol,1000 IU,tablet,vitamin,endocrine_nutrition,Vitamins & Mineral Supplements,
+Ferrous sulfate,Feosol,325 mg,tablet,iron supplement,blood,Antianemic Agent (Iron & Erythropoietin),Take with vitamin C
+Captopril,Capoten,25 mg,tablet,ACE inhibitor,cardiovascular_blood,ACE Inhibitor (ACEI),
+Losartan,Cozaar,50 mg,tablet,ARB,cardiovascular_blood,ARB (Angiotensin Receptor Blocker),
+Atorvastatin,Lipitor,20 mg,tablet,statin,cardiovascular_blood,Lipid-Lowering: HMG-CoA Reductase Inhibitor (Statin),
+Aspirin,Aspro,75 mg,tablet,antiplatelet,blood,Antiplatelet Agent (Cyclooxygenase / ADP),
+Metronidazole,Flagyl,500 mg,tablet,antiprotozoal,antiinfectives,Nitroimidazoles & Antiseptics,
+Diazepam,Valium,5 mg,tablet,benzodiazepine,neuro_mental_health,Benzodiazepines & Z-Drugs,
+Furosemide,Lasix,40 mg,tablet,diuretic,cardiovascular_blood,Diuretic: Loop Diuretic,
