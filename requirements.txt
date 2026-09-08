@@ -10,3 +10,4 @@ cryptography>=44.0
 google-genai>=2.22,<3
 xlrd>=2.0
 xlrd>=2.0
+xlrd>=2.0
