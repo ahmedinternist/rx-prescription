@@ -422,11 +422,73 @@ def test_requested_fields_use_directional_display_bindings():
     from main import App, DrugRow
 
     form_source = inspect.getsource(App.build_forms)
-    assert form_source.count("directional=True") >= 2
+    assert "patient_name_binding = DirectionalTextBinding" in form_source
+    assert form_source.count("directional=True") >= 1
     assert "DirectionalTextBinding(self, var)" in inspect.getsource(App.specialty_field)
     assert "DirectionalTextBinding(self, var)" in inspect.getsource(DrugRow._box)
     assert "DirectionalTextBinding(self, var)" in inspect.getsource(DrugRow._frequency_box)
     assert "DirectionalTextBinding(self, var)" in inspect.getsource(DrugRow._notes_box)
+
+
+def test_patient_page_has_compact_two_column_layout_and_expandable_history():
+    import inspect
+    from main import (
+        App,
+        PATIENT_AGE_WIDTH,
+        PATIENT_NAME_WIDTH,
+        PATIENT_RESULTS_HEIGHT,
+        PATIENT_SEARCH_WIDTH,
+        PATIENT_SEX_WIDTH,
+    )
+
+    form_source = inspect.getsource(App.build_forms)
+    assert "patient_fields.grid_columnconfigure(0, weight=0)" in form_source
+    assert "width=PATIENT_NAME_WIDTH" in form_source
+    assert "width=PATIENT_AGE_WIDTH" in form_source
+    assert "width=PATIENT_SEX_WIDTH" in form_source
+    assert form_source.count("width=PATIENT_SEARCH_WIDTH") == 2
+    assert "height=PATIENT_RESULTS_HEIGHT" in form_source
+    assert (PATIENT_NAME_WIDTH, PATIENT_AGE_WIDTH, PATIENT_SEX_WIDTH) == (410, 76, 126)
+    assert (PATIENT_SEARCH_WIDTH, PATIENT_RESULTS_HEIGHT) == (280, 190)
+    assert 'p = self.section(self.pages["patient"], "")' in form_source
+    assert "patient_meta" not in form_source
+    assert "patient_export" not in form_source
+    assert "prescriptions_panel.grid(row=0, column=1" in form_source
+    assert "patient_action_new" in form_source
+    assert "patient_action_save" in form_source
+    assert "patient_action_clear" in form_source
+    assert "patient_action_delete" in form_source
+    assert 'bind("<Double-Button-1>", self.load_selected_patient)' in form_source
+    assert 'self.bind_all("<Control-s>", self._save_patient_shortcut)' in form_source
+    history_source = inspect.getsource(App.show_patient_prescriptions)
+    assert "toggle_patient_prescription" in history_source
+    assert "duplicate_new_rx" not in history_source
+    assert "load_rx" in history_source
+    assert inspect.getsource(App._build_ui).count('I.t("save_profile")') == 0
+    assert form_source.count('I.t("save_profile")') == 1
+
+
+def test_patient_history_duplicate_matching_and_id_update(tmp_path):
+    code = '''
+from pathlib import Path
+from patient_history import PatientHistory
+
+path = Path(r"{history}")
+store = PatientHistory(path)
+first = store.save_patient({{"name":"أحمد علي", "age":"40", "sex":"M"}})
+store.save_patient({{"name":"Jane Smith", "age":"35", "sex":"F"}})
+
+# Arabic hamza variants and close Latin spelling are normalized for warnings.
+assert store.find_similar("احمد علي", "40")[0]["id"] == first["id"]
+assert store.find_similar("Jane Smit", "35")[0]["name"] == "Jane Smith"
+
+# A loaded patient's stable ID prevents a rename from creating a duplicate.
+updated = store.save_patient(
+    {{"name":"أحمد علي حسن", "age":"41", "sex":"M"}}, first["id"])
+assert updated["id"] == first["id"]
+assert len(store.search()) == 2
+'''.format(history=tmp_path / "patients.json")
+    run_isolated(tmp_path, code)
 
 
 def test_gemini_settings_are_encrypted_and_removable(tmp_path):

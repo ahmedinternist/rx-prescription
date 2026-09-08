@@ -7,6 +7,8 @@ on the device. Data is protected with Windows DPAPI for the current account.
 from __future__ import annotations
 
 import json
+import unicodedata
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -47,7 +49,14 @@ class PatientHistory:
 
     @staticmethod
     def _key(name: str) -> str:
-        return " ".join(name.casefold().split())
+        normalized = unicodedata.normalize("NFKD", str(name).casefold())
+        normalized = "".join(
+            char for char in normalized
+            if not unicodedata.combining(char) and not ("\u064b" <= char <= "\u065f"))
+        normalized = normalized.translate(str.maketrans({
+            "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي",
+        }))
+        return " ".join(normalized.split())
 
     def search(self, query: str = "") -> list[dict[str, Any]]:
         query = self._key(query)
@@ -57,13 +66,40 @@ class PatientHistory:
                        if query in self._key(str(record.get("name", "")))]
         return sorted(records, key=lambda record: record.get("updated_at", ""), reverse=True)
 
-    def save_patient(self, patient: dict[str, str]) -> dict[str, Any]:
+    def find_similar(self, name: str, age: str = "", threshold: float = 0.82,
+                     exclude_id: str = "") -> list[dict[str, Any]]:
+        """Return likely duplicates using normalized Arabic/Latin name matching."""
+        key = self._key(name)
+        if not key:
+            return []
+        age = str(age or "").strip()
+        matches = []
+        for record in self._load():
+            if exclude_id and record.get("id") == exclude_id:
+                continue
+            record_key = self._key(str(record.get("name", "")))
+            score = SequenceMatcher(None, key, record_key).ratio()
+            same_age = not age or not record.get("age") or str(record.get("age", "")).strip() == age
+            if score >= threshold and same_age:
+                item = record.copy()
+                item["similarity"] = score
+                matches.append(item)
+        return sorted(matches, key=lambda item: item["similarity"], reverse=True)
+
+    def get(self, record_id: str) -> dict[str, Any] | None:
+        record = next((item for item in self._load() if item.get("id") == record_id), None)
+        return record.copy() if record else None
+
+    def save_patient(self, patient: dict[str, str], record_id: str = "") -> dict[str, Any]:
         name = str(patient.get("name", "")).strip()
         if not name:
             raise ValueError("Patient name is required to save history.")
         records = self._load()
         key = self._key(name)
-        record = next((item for item in records if self._key(str(item.get("name", ""))) == key), None)
+        record = next((item for item in records if record_id and item.get("id") == record_id), None)
+        if record is None:
+            record = next((item for item in records
+                           if self._key(str(item.get("name", ""))) == key), None)
         now = datetime.now(timezone.utc).isoformat()
         if record is None:
             record = {"id": uuid4().hex, "created_at": now}
@@ -74,7 +110,8 @@ class PatientHistory:
         self._save(records)
         return record.copy()
 
-    def save_prescription(self, patient: dict[str, str], drugs: list[dict[str, str]]) -> dict[str, Any]:
+    def save_prescription(self, patient: dict[str, str], drugs: list[dict[str, str]],
+                          record_id: str = "") -> dict[str, Any]:
         """Append a local-only medication snapshot for a named patient."""
         name = str(patient.get("name", "")).strip()
         if not name:
@@ -91,7 +128,10 @@ class PatientHistory:
             raise ValueError("Add at least one medicine before saving a prescription.")
         records = self._load()
         key = self._key(name)
-        record = next((item for item in records if self._key(str(item.get("name", ""))) == key), None)
+        record = next((item for item in records if record_id and item.get("id") == record_id), None)
+        if record is None:
+            record = next((item for item in records
+                           if self._key(str(item.get("name", ""))) == key), None)
         now = datetime.now(timezone.utc).isoformat()
         if record is None:
             record = {"id": uuid4().hex, "created_at": now, "prescriptions": []}

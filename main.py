@@ -83,6 +83,11 @@ PAGE_TITLE_FONT_SIZE = 35
 SELECTED_MEDICINE_FONT_SIZE = 35
 DASHBOARD_WIDTH = 190
 PRESCRIBER_FIELD_WIDTH = 440
+PATIENT_NAME_WIDTH = 410
+PATIENT_AGE_WIDTH = 76
+PATIENT_SEX_WIDTH = 126
+PATIENT_SEARCH_WIDTH = 280
+PATIENT_RESULTS_HEIGHT = 190
 NAV_ICONS = {
     "prescriber": "✚", "patient": "⚕", "medications": "◒",
     "favorites": "★", "drug_classes": "⌬", "interaction_review": "⚯",
@@ -869,9 +874,6 @@ class App(ctk.CTk):
                       corner_radius=9, fg_color=CARD, text_color=ACCENT,
                       border_color=LINE, border_width=1, hover_color=ACCENT_SOFT,
                       command=self.export_word).pack(side="right", padx=6)
-        ctk.CTkButton(self.action, text=I.t("save_profile"), width=130, height=ACTION_HEIGHT,
-                      corner_radius=9, fg_color=GOOD, hover_color=GOOD_HOVER,
-                      command=self.save_profile).pack(side="right", padx=6)
         ctk.CTkButton(self.action, text=I.t("print"), width=110, height=ACTION_HEIGHT,
                       corner_radius=9, fg_color=ACCENT, hover_color=ACCENT_HOVER,
                       font=ctk.CTkFont(weight="bold", size=13),
@@ -897,8 +899,10 @@ class App(ctk.CTk):
         if accent:
             bar = ctk.CTkFrame(f, height=4, fg_color=ACCENT, corner_radius=0)
             bar.pack(fill="x", side="top")
-        ctk.CTkLabel(f, text=title, font=ctk.CTkFont(weight="bold", size=14),
-                     text_color=ACCENT, anchor="w").pack(anchor="w", padx=PAD, pady=(10, 4))
+        if title:
+            ctk.CTkLabel(f, text=title, font=ctk.CTkFont(weight="bold", size=14),
+                         text_color=ACCENT, anchor="w").pack(
+                             anchor="w", padx=PAD, pady=(10, 4))
         return f
 
     def page_header(self, parent, title, subtitle):
@@ -1082,59 +1086,129 @@ class App(ctk.CTk):
         self.specialty_field(
             d, I.t("specialty"), self.doctor_vars["specialty"],
             PRESCRIBER_FIELD_WIDTH)
+        ctk.CTkButton(
+            d, text=I.t("save_profile"), width=150, height=ACTION_HEIGHT,
+            corner_radius=9, fg_color=GOOD, hover_color=GOOD_HOVER,
+            command=self.save_profile).pack(
+                anchor="w", padx=(PAD + 130, PAD), pady=(2, PAD))
 
         self.page_header(self.pages["patient"], I.t("patient_details"), "")
-        p = self.section(self.pages["patient"], I.t("patient"))
-        self.field(
-            p, I.t("f_name"), self.patient_vars["name"], 220,
-            directional=True)
-        self.field(p, I.t("age"), self.patient_vars["age"], 90)
-        self.sex_field(p, I.t("sex"), self.patient_vars["sex"])
+        p = self.section(self.pages["patient"], "")
+
+        patient_fields = ctk.CTkFrame(p, fg_color="transparent")
+        patient_fields.pack(fill="x", padx=PAD, pady=(10, 7))
+        # The three patient controls use predictable compact widths.
+        patient_fields.grid_columnconfigure(0, weight=0)
+        patient_fields.grid_columnconfigure(1, weight=0)
+        patient_fields.grid_columnconfigure(2, weight=0)
+
+        name_col = ctk.CTkFrame(patient_fields, fg_color="transparent")
+        name_col.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkLabel(name_col, text=I.t("f_name"), text_color=MUTED,
+                     font=ctk.CTkFont(size=11), anchor="w").pack(fill="x", pady=(0, 3))
+        patient_name_binding = DirectionalTextBinding(self, self.patient_vars["name"])
+        self._bidi_bindings.append(patient_name_binding)
+        self.patient_name_entry = ctk.CTkEntry(
+            name_col, textvariable=patient_name_binding.display_var,
+            width=PATIENT_NAME_WIDTH, height=FIELD_HEIGHT,
+            corner_radius=9, border_color=LINE,
+            font=ctk.CTkFont(size=14), justify="left")
+        patient_name_binding.attach(self.patient_name_entry)
+        self.patient_name_entry.pack(fill="x")
+
+        age_col = ctk.CTkFrame(patient_fields, fg_color="transparent")
+        age_col.grid(row=0, column=1, sticky="ew", padx=6)
+        ctk.CTkLabel(age_col, text=I.t("age"), text_color=MUTED,
+                     font=ctk.CTkFont(size=11), anchor="w").pack(fill="x", pady=(0, 3))
+        self.patient_age_entry = ctk.CTkEntry(
+            age_col, textvariable=self.patient_vars["age"], width=PATIENT_AGE_WIDTH,
+            height=FIELD_HEIGHT,
+            corner_radius=9, border_color=LINE, font=ctk.CTkFont(size=14),
+            justify="left")
+        self.patient_age_entry.pack(anchor="w")
+
+        sex_col = ctk.CTkFrame(patient_fields, fg_color="transparent")
+        sex_col.grid(row=0, column=2, sticky="ew", padx=(6, 0))
+        ctk.CTkLabel(sex_col, text=I.t("sex"), text_color=MUTED,
+                     font=ctk.CTkFont(size=11), anchor="w").pack(fill="x", pady=(0, 3))
+        sex_labels = [I.t("sex_m"), I.t("sex_f")]
+        self._patient_sex_codes = {I.t("sex_m"): "M", I.t("sex_f"): "F"}
+        self.patient_sex_menu = ctk.CTkOptionMenu(
+            sex_col, values=sex_labels, width=PATIENT_SEX_WIDTH,
+            height=FIELD_HEIGHT, corner_radius=9,
+            fg_color=ACCENT_SOFT, text_color=ACCENT, button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER, dropdown_hover_color=ACCENT_SOFT,
+            command=self._set_patient_sex)
+        self.patient_sex_menu.set(I.t("sex_m"))
+        self.patient_sex_menu.pack(anchor="w")
+
         patient_actions = ctk.CTkFrame(p, fg_color="transparent")
-        patient_actions.pack(fill="x", padx=PAD, pady=(2, PAD))
-        ctk.CTkButton(patient_actions, text=I.t("new_patient"), height=ACTION_HEIGHT,
-                      command=self.new_patient).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(patient_actions, text=I.t("clear_patient"), height=ACTION_HEIGHT,
-                      fg_color=CARD, text_color=ACCENT, border_width=1,
-                      border_color=LINE, hover_color=ACCENT_SOFT,
-                      command=self.clear_patient_details).pack(side="left")
+        patient_actions.pack(fill="x", padx=PAD, pady=(1, PAD))
+        ctk.CTkButton(patient_actions, text=I.t("patient_action_new"), width=84,
+                      height=ACTION_HEIGHT, command=self.new_patient).pack(
+                          side="left", padx=(0, 4))
+        ctk.CTkButton(patient_actions, text=I.t("patient_action_save"), width=84,
+                      height=ACTION_HEIGHT, fg_color=GOOD, hover_color=GOOD_HOVER,
+                      command=self.save_patient_history).pack(side="left", padx=4)
+        ctk.CTkButton(patient_actions, text=I.t("patient_action_clear"), width=84,
+                      height=ACTION_HEIGHT, fg_color=CARD, text_color=ACCENT,
+                      border_width=1, border_color=LINE, hover_color=ACCENT_SOFT,
+                      command=self.clear_patient_details).pack(side="left", padx=4)
+        self.patient_delete_button = ctk.CTkButton(
+            patient_actions, text=I.t("patient_action_delete"), width=84,
+            height=ACTION_HEIGHT, fg_color=DANGER, hover_color=DANGER_HOVER,
+            state="disabled", command=self.delete_selected_patient)
+        self.patient_delete_button.pack(side="left", padx=4)
 
         history = self.section(self.pages["patient"], I.t("patient_history"))
+        patient_history_grid = ctk.CTkFrame(history, fg_color="transparent")
+        patient_history_grid.pack(fill="x", padx=PAD, pady=(0, PAD))
+        patient_history_grid.grid_columnconfigure(0, weight=0)
+        patient_history_grid.grid_columnconfigure(1, weight=1)
         self.patient_search_var = tk.StringVar()
         self.patient_search_var.trace_add("write", lambda *_: self.refresh_patient_history())
-        # Compact, readable patient finder: a half-width search field paired
-        # with a shorter result list rather than two full-width boxes.
-        patient_finder = ctk.CTkFrame(history, fg_color="transparent")
-        patient_finder.pack(anchor="w", padx=PAD, pady=(0, 8))
-        ctk.CTkEntry(patient_finder, textvariable=self.patient_search_var, width=360,
-                     height=FIELD_HEIGHT, placeholder_text=I.t("search_patients"), border_color=ACCENT,
-                     corner_radius=9, font=ctk.CTkFont(size=16)).pack(anchor="w", pady=(0, 6))
-        result_shell = ctk.CTkFrame(patient_finder, width=720, fg_color="#f8fcfb",
-                                    border_color=LINE, border_width=1, corner_radius=9)
+        patient_finder = ctk.CTkFrame(patient_history_grid, fg_color="transparent")
+        patient_finder.grid(row=0, column=0, sticky="nw", padx=(0, 10))
+        patient_search_binding = DirectionalTextBinding(self, self.patient_search_var)
+        self._bidi_bindings.append(patient_search_binding)
+        self.patient_search_entry = ctk.CTkEntry(
+            patient_finder, textvariable=patient_search_binding.display_var,
+            width=PATIENT_SEARCH_WIDTH,
+            height=FIELD_HEIGHT, placeholder_text=I.t("search_patients"),
+            border_color=ACCENT, corner_radius=9, font=ctk.CTkFont(size=16),
+            justify="left")
+        patient_search_binding.attach(self.patient_search_entry)
+        self.patient_search_entry.pack(anchor="w", pady=(0, 6))
+        result_shell = ctk.CTkFrame(
+            patient_finder, width=PATIENT_SEARCH_WIDTH,
+            height=PATIENT_RESULTS_HEIGHT, fg_color="#f8fcfb",
+            border_color=LINE, border_width=1, corner_radius=9)
+        result_shell.pack_propagate(False)
         result_shell.pack(anchor="w")
-        self.patient_history_list = tk.Listbox(result_shell, height=5, width=39,
+        self.patient_history_list = tk.Listbox(result_shell, height=5,
                                                font=LIST_FONT, bg="#f8fcfb", fg="#1a302e",
                                                relief="flat", borderwidth=0, highlightthickness=0,
                                                selectbackground=ACCENT, selectforeground="white",
                                                activestyle="none")
         self.patient_history_list.pack(fill="both", expand=True, padx=4, pady=4)
         self.patient_history_list.bind("<<ListboxSelect>>", self.select_patient_history)
-        history_actions = ctk.CTkFrame(history, fg_color="transparent")
-        history_actions.pack(fill="x", padx=PAD, pady=(0, PAD))
-        ctk.CTkButton(history_actions, text=I.t("save_patient"), height=ACTION_HEIGHT,
-                      command=self.save_patient_history).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(history_actions, text=I.t("load_patient"), height=ACTION_HEIGHT,
-                      fg_color=CARD, text_color=ACCENT, border_width=1,
-                      border_color=LINE, hover_color=ACCENT_SOFT,
-                      command=self.load_selected_patient).pack(side="left", padx=4)
-        ctk.CTkButton(history_actions, text=I.t("delete_patient"), height=ACTION_HEIGHT,
-                      fg_color=DANGER, hover_color=DANGER_HOVER,
-                      command=self.delete_selected_patient).pack(side="right")
-        ctk.CTkLabel(history, text=I.t("previous_prescriptions"), text_color=ACCENT,
+        self.patient_history_list.bind("<Double-Button-1>", self.load_selected_patient)
+        self.patient_search_entry.bind("<Return>", self.load_selected_patient)
+        self.patient_search_entry.bind("<Escape>", self.clear_patient_search)
+        prescriptions_panel = ctk.CTkFrame(patient_history_grid, fg_color="transparent")
+        prescriptions_panel.grid(row=0, column=1, sticky="nsew")
+        ctk.CTkLabel(prescriptions_panel, text=I.t("previous_prescriptions"), text_color=ACCENT,
                      font=ctk.CTkFont(size=11, weight="bold"), anchor="w").pack(
-                         fill="x", padx=PAD, pady=(8, 3))
-        self.patient_prescriptions_body = ctk.CTkFrame(history, fg_color="transparent")
-        self.patient_prescriptions_body.pack(fill="x", padx=PAD, pady=(0, PAD))
+                         fill="x", pady=(0, 3))
+        self.patient_prescriptions_body = ctk.CTkFrame(
+            prescriptions_panel, fg_color="transparent")
+        self.patient_prescriptions_body.pack(fill="x")
+        self._loaded_patient_id = ""
+        self._expanded_prescription_ids = set()
+        self._current_history_record = None
+        self.patient_name_entry.bind("<Return>", lambda _event: self.patient_age_entry.focus_set())
+        self.patient_age_entry.bind("<Return>", lambda _event: self.patient_sex_menu.focus_set())
+        self.bind_all("<Control-s>", self._save_patient_shortcut)
         self._show_empty_prescriptions()
 
         self.page_header(self.pages["medications"], I.t("medication_entry"), "")
@@ -2648,8 +2722,7 @@ class App(ctk.CTk):
     def clear_all(self):
         for v in self.doctor_vars.values():
             v.set("")
-        for v in self.patient_vars.values():
-            v.set("")
+        self.clear_patient_details()
         for r in list(self.rows):
             r.destroy()
         self.rows = []
@@ -2665,9 +2738,61 @@ class App(ctk.CTk):
         for record in self._patient_history_records:
             prescriptions = record.get("prescriptions", [])
             last_saved = max((str(item.get("saved_at", ""))[:10] for item in prescriptions), default="")
-            detail = I.t("last_prescription", date=last_saved) if last_saved else " · ".join(
-                value for value in [record.get("age", ""), record.get("sex", "")] if value)
-            self.patient_history_list.insert(tk.END, record.get("name", "") + (f" — {detail}" if detail else ""))
+            detail = I.t("last_prescription", date=last_saved or I.t("none_short"))
+            display = f"{record.get('name', '')} — {detail}"
+            self.patient_history_list.insert(tk.END, directional_display_text(display))
+        self._select_patient_record(self._loaded_patient_id)
+
+    def _select_patient_record(self, record_id):
+        if not record_id or not hasattr(self, "_patient_history_records"):
+            return
+        for index, record in enumerate(self._patient_history_records):
+            if record.get("id") == record_id:
+                self.patient_history_list.selection_clear(0, tk.END)
+                self.patient_history_list.selection_set(index)
+                self.patient_history_list.see(index)
+                break
+
+    def _set_patient_sex(self, label):
+        self.patient_vars["sex"].set(self._patient_sex_codes.get(label, ""))
+
+    def _set_patient_form(self, record):
+        for key, variable in self.patient_vars.items():
+            variable.set(str(record.get(key, "")))
+        sex_code = str(record.get("sex", ""))
+        sex_label = next(
+            (label for label, code in self._patient_sex_codes.items() if code == sex_code),
+            I.t("sex_m"))
+        self.patient_sex_menu.set(sex_label)
+        self._loaded_patient_id = str(record.get("id", ""))
+        self.patient_delete_button.configure(state="normal")
+
+    def _selected_or_loaded_patient(self):
+        selected = self.patient_history_list.curselection()
+        if selected and selected[0] < len(self._patient_history_records):
+            return self._patient_history_records[selected[0]]
+        if self._loaded_patient_id:
+            return self.patient_history.get(self._loaded_patient_id)
+        return None
+
+    def _warn_similar_patient(self):
+        if self._loaded_patient_id:
+            return True
+        name = self.patient_vars["name"].get().strip()
+        age = self.patient_vars["age"].get().strip()
+        matches = self.patient_history.find_similar(name, age)
+        if not matches:
+            return True
+        match = matches[0]
+        load_existing = messagebox.askyesno(
+            I.t("similar_patient_title"),
+            I.t("similar_patient_message", name=match.get("name", ""),
+                age=match.get("age", "") or I.t("none_short")),
+            parent=self)
+        if load_existing:
+            self._load_patient_record(match)
+            return False
+        return True
 
     def _show_empty_prescriptions(self):
         if not hasattr(self, "patient_prescriptions_body"):
@@ -2681,7 +2806,10 @@ class App(ctk.CTk):
         selected = self.patient_history_list.curselection()
         if not selected:
             return
-        self.show_patient_prescriptions(self._patient_history_records[selected[0]])
+        record = self._patient_history_records[selected[0]]
+        self._current_history_record = record
+        self.patient_delete_button.configure(state="normal")
+        self.show_patient_prescriptions(record)
 
     def show_patient_prescriptions(self, record):
         prescriptions = list(record.get("prescriptions", []))
@@ -2690,65 +2818,122 @@ class App(ctk.CTk):
             return
         for child in self.patient_prescriptions_body.winfo_children():
             child.destroy()
-        for number, prescription in enumerate(reversed(prescriptions), 1):
+        prescriptions.sort(key=lambda item: str(item.get("saved_at", "")), reverse=True)
+        for prescription in prescriptions:
             saved_at = str(prescription.get("saved_at", ""))[:10]
             drugs = prescription.get("drugs", [])
             card = ctk.CTkFrame(self.patient_prescriptions_body, fg_color="#f8faff",
                                 border_color=LINE, border_width=1, corner_radius=9)
             card.pack(fill="x", pady=3)
-            summary = I.t("previous_prescription_heading", number=number, date=saved_at or "—")
-            ctk.CTkLabel(card, text=summary, text_color=ACCENT,
-                         font=ctk.CTkFont(size=11, weight="bold"), anchor="w").pack(
-                             fill="x", padx=10, pady=(7, 1))
-            names = ", ".join(str(drug.get("generic_name", "")) for drug in drugs[:3])
-            if len(drugs) > 3:
-                names += I.t("more_medicines", n=len(drugs) - 3)
-            ctk.CTkLabel(card, text=I.t("previous_prescription_summary", count=len(drugs), names=names),
-                         text_color=MUTED, font=ctk.CTkFont(size=10), anchor="w").pack(
-                             fill="x", padx=10, pady=(0, 5))
-            ctk.CTkButton(card, text=I.t("load_previous_prescription"), height=ACTION_HEIGHT, width=178,
-                          fg_color=CARD, text_color=ACCENT, border_width=1,
-                          border_color=LINE, hover_color=ACCENT_SOFT,
-                          command=lambda item=prescription, patient=record: self.load_saved_prescription(patient, item)).pack(
-                              anchor="e", padx=8, pady=(0, 7))
+            prescription_id = str(prescription.get("id", ""))
+            expanded = prescription_id in self._expanded_prescription_ids
+            arrow = "▾" if expanded else "▸"
+            ctk.CTkButton(
+                card,
+                text=f"{arrow}  {saved_at or '—'}  ·  {I.t('medicine_count', n=len(drugs))}",
+                height=36, anchor="w", fg_color="transparent", text_color=ACCENT,
+                hover_color=ACCENT_SOFT, font=ctk.CTkFont(size=12, weight="bold"),
+                command=lambda item_id=prescription_id, patient=record:
+                    self.toggle_patient_prescription(patient, item_id)).pack(
+                        fill="x", padx=6, pady=4)
+            if not expanded:
+                continue
+            details = ctk.CTkFrame(card, fg_color="transparent")
+            details.pack(fill="x", padx=12, pady=(0, 6))
+            for number, drug in enumerate(drugs, 1):
+                name = str(drug.get("brand_name", "") or drug.get("generic_name", ""))
+                scientific = str(drug.get("generic_name", ""))
+                if drug.get("brand_name") and scientific:
+                    name = f"{name} ({scientific})"
+                regimen = "  ·  ".join(
+                    str(drug.get(key, "")).strip()
+                    for key in ("dosage", "frequency", "duration", "notes")
+                    if str(drug.get(key, "")).strip())
+                line = f"{number}. {name}" + (f" — {regimen}" if regimen else "")
+                ctk.CTkLabel(
+                    details, text=directional_display_text(line), text_color="#243b39",
+                    font=ctk.CTkFont(size=11), anchor="w", justify="left",
+                    wraplength=720).pack(fill="x", pady=2)
+            actions = ctk.CTkFrame(details, fg_color="transparent")
+            actions.pack(fill="x", pady=(5, 0))
+            ctk.CTkButton(
+                actions, text=I.t("load_rx"), width=100, height=32,
+                fg_color=CARD, text_color=ACCENT, border_width=1,
+                border_color=LINE, hover_color=ACCENT_SOFT,
+                command=lambda item=prescription, patient=record:
+                    self.load_saved_prescription(patient, item)).pack(side="left")
+
+    def toggle_patient_prescription(self, record, prescription_id):
+        if prescription_id in self._expanded_prescription_ids:
+            self._expanded_prescription_ids.remove(prescription_id)
+        else:
+            self._expanded_prescription_ids.add(prescription_id)
+        self.show_patient_prescriptions(record)
 
     def save_patient_history(self):
+        if not self._warn_similar_patient():
+            return
         try:
-            self.patient_history.save_patient({key: variable.get() for key, variable in self.patient_vars.items()})
+            record = self.patient_history.save_patient(
+                {key: variable.get() for key, variable in self.patient_vars.items()},
+                self._loaded_patient_id)
         except ValueError as exc:
             messagebox.showinfo(APP_TITLE, str(exc))
             return
+        self._loaded_patient_id = str(record.get("id", ""))
+        self.patient_delete_button.configure(state="normal")
+        self.patient_search_var.set("")
         self.refresh_patient_history()
 
-    def load_selected_patient(self):
+    def load_selected_patient(self, event=None):
         selected = self.patient_history_list.curselection()
         if not selected:
             return
-        record = self._patient_history_records[selected[0]]
-        for key, variable in self.patient_vars.items():
-            variable.set(record.get(key, ""))
+        self._load_patient_record(self._patient_history_records[selected[0]])
+        return "break" if event else None
+
+    def _load_patient_record(self, record):
+        self._set_patient_form(record)
+        self._current_history_record = record
+        self._select_patient_record(record.get("id", ""))
         self.show_patient_prescriptions(record)
 
     def delete_selected_patient(self):
-        selected = self.patient_history_list.curselection()
-        if not selected:
+        record = self._selected_or_loaded_patient()
+        if not record:
             return
-        record = self._patient_history_records[selected[0]]
         if not messagebox.askyesno(I.t("delete_patient"), I.t("delete_patient_confirm", name=record.get("name", ""))):
             return
         if self.patient_history.delete(record.get("id", "")):
+            if record.get("id") == self._loaded_patient_id:
+                self.clear_patient_details()
             self.refresh_patient_history()
             self._show_empty_prescriptions()
 
     def new_patient(self):
         self.clear_patient_details()
         self.patient_search_var.set("")
+        self.patient_name_entry.focus_set()
 
     def clear_patient_details(self):
         for variable in self.patient_vars.values():
             variable.set("")
+        self.patient_sex_menu.set(I.t("sex_m"))
+        self._loaded_patient_id = ""
+        self._current_history_record = None
         self.patient_history_list.selection_clear(0, tk.END)
+        self.patient_delete_button.configure(state="disabled")
         self._show_empty_prescriptions()
+
+    def clear_patient_search(self, event=None):
+        self.patient_search_var.set("")
+        return "break" if event else None
+
+    def _save_patient_shortcut(self, event=None):
+        if getattr(self, "active_page", "") == "patient":
+            self.save_patient_history()
+            return "break"
+        return None
 
     def load_saved_prescription(self, patient, prescription):
         if self.rows and any(
@@ -2756,8 +2941,7 @@ class App(ctk.CTk):
                 for row in self.rows):
             if not messagebox.askyesno(I.t("load_previous_prescription"), I.t("replace_current_medicines")):
                 return
-        for key, variable in self.patient_vars.items():
-            variable.set(patient.get(key, ""))
+        self._set_patient_form(patient)
         for row in list(self.rows):
             row.destroy()
         self.rows = []
@@ -2769,15 +2953,19 @@ class App(ctk.CTk):
         self.show_page("medications")
 
     def save_prescription_for_patient(self):
+        if not self._warn_similar_patient():
+            return
         patient = {key: variable.get() for key, variable in self.patient_vars.items()}
         drugs = [row.get_data() for row in self.rows
                  if row.get_data().generic_name or row.get_data().brand_name]
         try:
             record = self.patient_history.save_prescription(
-                patient, [drug.__dict__ for drug in drugs])
+                patient, [drug.__dict__ for drug in drugs], self._loaded_patient_id)
         except ValueError as exc:
             messagebox.showinfo(I.t("save_patient_prescription"), str(exc))
             return
+        self._loaded_patient_id = str(record.get("id", ""))
+        self.patient_search_var.set("")
         self.refresh_patient_history()
         self.show_patient_prescriptions(record)
         messagebox.showinfo(I.t("save_patient_prescription"), I.t("patient_prescription_saved"))
