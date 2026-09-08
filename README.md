@@ -12,6 +12,27 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Optional Gemini drug reference
+
+The amber **!** beside a populated scientific-name field opens a concise
+Gemini Flash reference card for that medicine. The app uses Google's
+rolling `gemini-flash-latest` model alias with stable-version fallbacks. It returns
+nine validated sections: indications, minimum and usual starting dose, minimum
+and usual frequency, maximum dose/frequency, adverse effects, contraindications, pregnancy,
+and renal adjustment. Grounded results include returned source links.
+
+1. Create a Gemini API key in Google AI Studio.
+2. Open **Settings → Gemini drug reference…**.
+3. Paste the key, enable the feature, and use **Test connection**.
+
+The API key and the seven-day lookup cache are encrypted for the current
+Windows user. Only the scientific medicine name is included in lookup requests;
+patient and prescription data are not sent. Results are reference material for
+clinician verification and never fill prescription fields automatically.
+The app first requests live Google Search grounding. If Google returns a quota
+error, it automatically retries without web search and marks the result clearly
+as **Free mode — not web-grounded**; no source links are claimed in that mode.
+
 ## Build the Windows executable
 ```powershell
 powershell -ExecutionPolicy Bypass -File build_exe.ps1

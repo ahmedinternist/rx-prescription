@@ -151,12 +151,6 @@ async function render(p){
           (pat.name?`<div class="identity">${esc(pat.name)}</div>`:'')+kv(patBits)+
           (p.date?`<div class="rxid" style="margin-top:8px">Date: ${esc(p.date)}</div>`:'')+
           (p.rx_id?`<div class="rxid">Rx No: ${esc(p.rx_id)}</div>`:'')+`</div>`;
-  if(p.diagnosis || p.refills){
-    html += `<div class="section"><h2>Clinical details</h2>${kv([
-      p.diagnosis?{l:'Diagnosis',v:p.diagnosis}:null,
-      p.refills?{l:'Refills',v:p.refills}:null])}</div>`;
-  }
-
   html += '<div class="section"><h2>Medications</h2>';
   const drugs = p.drugs||[];
   if(drugs.length){
@@ -168,7 +162,11 @@ async function render(p){
             medicationColumns.map(([, label]) => `<th>${label}</th>`).join('')+
             '</tr></thead><tbody>';
     drugs.forEach((m,i)=>{
-      const name = esc(m.generic_name||'') + (m.brand_name?` <span class="badge">${esc(m.brand_name)}</span>`:'');
+      const scientific = m.generic_name || '';
+      const brand = m.brand_name || '';
+      const name = scientific && brand
+        ? `${esc(scientific)} <span class="badge">${esc(brand)}</span>`
+        : esc(scientific || brand);
       html += `<tr><td>${i+1}</td><td>${name}</td>`+
               medicationColumns.map(([key]) => `<td>${esc(m[key])}</td>`).join('')+'</tr>';
     });

@@ -88,6 +88,15 @@ def safe(text: str) -> str:
     return ar(escape(text or ""))
 
 
+def medicine_name(drug) -> str:
+    """Return a complete medicine identity without placeholders or duplication."""
+    scientific = (drug.generic_name or "").strip()
+    brand = (drug.brand_name or "").strip()
+    if scientific and brand and scientific.casefold() != brand.casefold():
+        return f"{scientific} ({brand})"
+    return scientific or brand or "—"
+
+
 def _t(key, **kw):
     return ar(I.t(key, **kw))
 
@@ -178,13 +187,12 @@ def _generate_modern_prescription_pdf(rx: Prescription, output_path: str, paper_
     patient.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), soft), ("ROUNDEDCORNERS", [15,15,15,15]), ("TOPPADDING", (0,0), (-1,-1), 11*scale), ("BOTTOMPADDING", (0,0), (-1,-1), 11*scale), ("LEFTPADDING", (0,0), (-1,-1), 13*scale), ("RIGHTPADDING", (0,0), (-1,-1), 13*scale)]))
     story += [patient, Spacer(1, 8 * mm * scale)]
     for number, drug_item in enumerate(rx.drugs, 1):
-        title = safe(drug_item.generic_name or "—") + (f" ({safe(drug_item.brand_name)})" if drug_item.brand_name else "")
-        # A medication with no prescribed schedule should be displayed as a
-        # name only.  Free-form notes must not create an otherwise empty
-        # dosage/frequency/duration line in the preview.
+        title = safe(medicine_name(drug_item))
+        # Display only values actually chosen for this medication.
         details = " - ".join(
             safe(x)
-            for x in [drug_item.dosage, drug_item.frequency, drug_item.duration]
+            for x in [drug_item.dosage, drug_item.frequency, drug_item.duration,
+                      drug_item.notes]
             if x
         )
         body = [Paragraph(title, medicine)] + ([Paragraph(details, base)] if details else [])
@@ -215,26 +223,75 @@ def _qr_path(qr_pil_image) -> Optional[str]:
 
 
 def _apply_docx_language(doc) -> None:
-    """Mark Word paragraphs RTL when Arabic is selected (PDF already shapes RTL)."""
-    if I.get_lang() != "ar":
-        return
+    """Set Word bidirectional metadata for Arabic text in either UI language."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+
+    def has_arabic(text: str) -> bool:
+        return any("\u0600" <= char <= "\u08ff" for char in text)
+
+    def has_latin(text: str) -> bool:
+        return any(("A" <= char <= "Z") or ("a" <= char <= "z") for char in text)
+
     paragraphs = list(doc.paragraphs)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 paragraphs.extend(cell.paragraphs)
     for paragraph in paragraphs:
-        p_pr = paragraph._p.get_or_add_pPr()
-        bidi = OxmlElement("w:bidi")
-        bidi.set(qn("w:val"), "1")
-        p_pr.append(bidi)
+        text = paragraph.text
+        # Arabic UI is right-to-left throughout.  Under the English UI, make
+        # Arabic-only values (such as a table cell) RTL while preserving the
+        # English label/value order in mixed paragraphs.
+        if I.get_lang() == "ar" or (has_arabic(text) and not has_latin(text)):
+            p_pr = paragraph._p.get_or_add_pPr()
+            bidi = OxmlElement("w:bidi")
+            bidi.set(qn("w:val"), "1")
+            p_pr.append(bidi)
         for run in paragraph.runs:
+            if not has_arabic(run.text):
+                continue
             r_pr = run._r.get_or_add_rPr()
             rtl = OxmlElement("w:rtl")
             rtl.set(qn("w:val"), "1")
             r_pr.append(rtl)
+            language = OxmlElement("w:lang")
+            language.set(qn("w:bidi"), "ar-IQ")
+            r_pr.append(language)
+
+
+def _word_medication_columns(drugs):
+    """Return only medication detail columns that contain a value."""
+    fields = [
+        ("dosage", I.t("pdf_col_dosage")),
+        ("frequency", I.t("pdf_col_freq")),
+        ("duration", I.t("pdf_col_duration")),
+        ("notes", I.t("pdf_col_notes")),
+    ]
+    return [(field, label) for field, label in fields
+            if any(getattr(drug, field, "").strip() for drug in drugs)]
+
+
+def _append_word_medication_lines(doc, drugs) -> None:
+    """Append numbered medication lines with clear spacing between fields."""
+    from docx.shared import Pt
+
+    for number, drug in enumerate(drugs, 1):
+        paragraph = doc.add_paragraph()
+        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(1)
+        paragraph.paragraph_format.line_spacing = 1
+        marker = paragraph.add_run(f"{number}.    ")
+        marker.bold = True
+        name_run = paragraph.add_run(medicine_name(drug))
+        name_run.bold = True
+        details = [value for value in (drug.dosage, drug.frequency,
+                                       drug.duration, drug.notes) if value]
+        if details:
+            # Separate the medicine name and each supplied clinical detail so
+            # the line is easy to scan without reverting to a table.
+            field_gap = "      "
+            paragraph.add_run(field_gap + field_gap.join(details))
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +380,9 @@ def generate_prescription_pdf(
               Paragraph(_t("pdf_col_notes"), s["cellb"])]
     data = [header]
     for i, d in enumerate(rx.drugs, 1):
-        drug_txt = f"<b>{safe(d.generic_name or '—')}</b>"
-        if d.brand_name:
+        primary_name = d.generic_name or d.brand_name or "—"
+        drug_txt = f"<b>{safe(primary_name)}</b>"
+        if d.generic_name and d.brand_name and d.generic_name.casefold() != d.brand_name.casefold():
             drug_txt += f"<br/><font size=7 color='#5b6b85'>{safe(d.brand_name)}</font>"
         data.append([Paragraph(str(i), s["cell"]),
                      Paragraph(drug_txt, s["cell"]),
@@ -413,36 +471,12 @@ def generate_medication_label_docx(rx: Prescription, output_path: str,
     style.font.name = "Calibri"
     style.font.size = Pt(10)
 
-    # 7-line blank banner at the top (above the heading / border)
-    for _ in range(7):
+    # Eight blank lines leave one extra writing line for a stamped/printed
+    # header while keeping the no-header layout intentionally unbranded.
+    for _ in range(8):
         doc.add_paragraph()
 
-    h = doc.add_paragraph()
-    rh = h.add_run(I.t("pdf_medications"))
-    rh.bold = True
-    rh.font.size = Pt(13)
-    rh.font.color.rgb = navy
-
-    table = doc.add_table(rows=1, cols=5)
-    table.style = "Light Grid Accent 1"
-    hdr = table.rows[0].cells
-    for i, txt in enumerate([I.t("pdf_col_no"), I.t("pdf_col_drug"),
-                             I.t("pdf_col_dosage"), I.t("pdf_col_freq"),
-                             I.t("pdf_col_duration")]):
-        hdr[i].paragraphs[0].add_run(txt).bold = True
-    for i, d in enumerate(rx.drugs, 1):
-        cells = table.add_row().cells
-        cells[0].text = str(i)
-        name = d.generic_name or "—"
-        if d.brand_name:
-            name += f"\n({d.brand_name})"
-        cells[1].text = name
-        cells[2].text = d.dosage or ""
-        cells[3].text = d.frequency or ""
-        cells[4].text = d.duration or ""
-        # notes, if present, appended under the dosage cell
-        if d.notes:
-            cells[2].text += f"\n({I.t('notes')}: {d.notes})"
+    _append_word_medication_lines(doc, rx.drugs)
 
     # a few blank lines, then the QR a few lines above the bottom-right corner
     for _ in range(3):
@@ -477,7 +511,6 @@ def generate_prescription_docx(rx: Prescription, output_path: str,
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.enum.table import WD_TABLE_ALIGNMENT
 
     navy = RGBColor(0x0b, 0x3d, 0x91)
     muted = RGBColor(0x5b, 0x6b, 0x85)
@@ -549,29 +582,7 @@ def generate_prescription_docx(rx: Prescription, output_path: str,
 
     doc.add_paragraph()
 
-    h = doc.add_paragraph()
-    rh = h.add_run(I.t("pdf_medications"))
-    rh.bold = True
-    rh.font.color.rgb = navy
-
-    table = doc.add_table(rows=1, cols=6)
-    table.style = "Light Grid Accent 1"
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    hdr = table.rows[0].cells
-    for i, txt in enumerate([I.t("pdf_col_no"), I.t("pdf_col_drug"), I.t("pdf_col_dosage"),
-                             I.t("pdf_col_freq"), I.t("pdf_col_duration"), I.t("pdf_col_notes")]):
-        hdr[i].paragraphs[0].add_run(txt).bold = True
-    for i, d in enumerate(rx.drugs, 1):
-        cells = table.add_row().cells
-        cells[0].text = str(i)
-        name = d.generic_name or "—"
-        if d.brand_name:
-            name += f"\n({d.brand_name})"
-        cells[1].text = name
-        cells[2].text = d.dosage or ""
-        cells[3].text = d.frequency or ""
-        cells[4].text = d.duration or ""
-        cells[5].text = d.notes or ""
+    _append_word_medication_lines(doc, rx.drugs)
 
     doc.add_paragraph()
     sig = doc.add_paragraph()

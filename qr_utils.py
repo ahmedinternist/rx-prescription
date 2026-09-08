@@ -105,7 +105,11 @@ class Prescription:
 
         drugs: List[Dict[str, str]] = []
         for drug in self.drugs:
-            item = {"generic_name": drug.generic_name}
+            item: Dict[str, str] = {}
+            if drug.generic_name:
+                item["generic_name"] = drug.generic_name
+            if drug.brand_name:
+                item["brand_name"] = drug.brand_name
             for field_name in ("dosage", "frequency", "duration", "notes"):
                 value = getattr(drug, field_name)
                 if value:
@@ -291,10 +295,12 @@ def validate_prescription(prescription: Prescription) -> tuple[list[str], list[s
 
     seen: set[str] = set()
     for index, drug in enumerate(prescription.drugs, 1):
-        if not drug.generic_name:
+        medicine_name = drug.generic_name or drug.brand_name
+        if not medicine_name:
             errors.append(f"Medication {index}: drug name is required.")
-        normalized = " ".join(drug.generic_name.casefold().split())
+            continue
+        normalized = " ".join(medicine_name.casefold().split())
         if normalized in seen:
-            warnings.append(f"{drug.generic_name}: duplicate medication.")
+            warnings.append(f"{medicine_name}: duplicate medication.")
         seen.add(normalized)
     return errors, warnings
