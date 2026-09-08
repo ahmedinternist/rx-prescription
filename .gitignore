@@ -49,3 +49,5 @@ output/
 # Data files that are not the seed DB
 data/*.xlsx
 data/*.xls
+
+.test-tmp/
