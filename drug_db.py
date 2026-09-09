@@ -364,3 +364,20 @@ class DrugDatabase:
         drug.detailed_class = detailed_class.strip()
         self._write(self.drugs)
         return True
+
+    def update_classifications(self, names, therapeutic_group: str,
+                               detailed_class: str) -> int:
+        """Persist one reviewed classification for several selected medicines."""
+        wanted = {_norm(str(name)) for name in names if str(name).strip()}
+        if not wanted:
+            return 0
+        updated = 0
+        for drug in self.drugs:
+            if _norm(drug.generic_name) not in wanted:
+                continue
+            drug.therapeutic_group = therapeutic_group.strip()
+            drug.detailed_class = detailed_class.strip()
+            updated += 1
+        if updated:
+            self._write(self.drugs)
+        return updated

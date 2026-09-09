@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 from security import DataProtectionError, protect, unprotect
 
-APP_VERSION = "4.47.0"
+APP_VERSION = "4.53.0"
 PAPER_SIZES: Dict[str, tuple[float, float]] = {
     "A5": (420.945, 595.276), "A4": (595.276, 841.889), "Letter": (612.0, 792.0),
 }

@@ -20,8 +20,14 @@ GROUPS = (
     "gastrointestinal", "endocrine_nutrition", "cardiovascular_blood",
     "blood", "antiinfectives", "pain_musculoskeletal", "neuro_mental_health",
     "respiratory_allergy_ent", "skin_eye_ear", "genitourinary_reproductive",
-    "pediatric_fluids",
+    "pediatric_preparations", "iv_fluids_devices",
 )
+
+# Older app builds stored these combined group codes in imported databases and
+# favorites.  Keep them readable while presenting the new, clearer groups.
+GROUP_ALIASES = {
+    "pediatric_fluids": "pediatric_preparations",
+}
 
 SUBCLASSES = {
     "gastrointestinal": (
@@ -144,6 +150,12 @@ SUBCLASSES = {
         "Emergency Contraceptive",
         "Vaginal Antifungal & Antimicrobial",
     ),
+    "pediatric_preparations": (
+        "Pediatric Preparations",
+    ),
+    "iv_fluids_devices": (
+        "IV Fluids & Devices",
+    ),
 }
 
 # Seed-database mapping. New or imported data can supply therapeutic_group and
@@ -206,6 +218,15 @@ def classify(name: str, category: str = "", therapeutic_group: str = "",
              detailed_class: str = "") -> Optional[DrugClass]:
     """Return a group/class for a medicine, or None when it is not mapped."""
     explicit_group = therapeutic_group.strip()
+    if explicit_group == "pediatric_fluids":
+        combined_text = " ".join((name, category, detailed_class)).casefold()
+        explicit_group = (
+            "iv_fluids_devices"
+            if any(token in combined_text for token in ("iv ", "fluid", "device", "cannula"))
+            else "pediatric_preparations"
+        )
+    else:
+        explicit_group = GROUP_ALIASES.get(explicit_group, explicit_group)
     if explicit_group:
         return DrugClass(explicit_group, detailed_class.strip() or category.strip() or "Class not specified")
     mapped = _NAMES.get(name.casefold().strip())

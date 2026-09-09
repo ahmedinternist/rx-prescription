@@ -164,9 +164,12 @@ assert len(genitourinary) == 8
 assert genitourinary[0] == "BPH Agent: Alpha-1 Blocker"
 assert genitourinary[-1] == "Vaginal Antifungal & Antimicrobial"
 all_classes = classes.all_subclasses()
-assert len(all_classes) == 100
+assert len(all_classes) == 102
 assert all_classes[0] == ("gastrointestinal", "PPI (Proton Pump Inhibitor)")
-assert all_classes[-1] == ("genitourinary_reproductive", "Vaginal Antifungal & Antimicrobial")
+assert all_classes[-2] == ("pediatric_preparations", "Pediatric Preparations")
+assert all_classes[-1] == ("iv_fluids_devices", "IV Fluids & Devices")
+assert classes.classify("Pediatric syrup", therapeutic_group="pediatric_fluids").code == "pediatric_preparations"
+assert classes.classify("Normal saline IV fluid", therapeutic_group="pediatric_fluids").code == "iv_fluids_devices"
 blood = classes.subclasses_for("blood")
 assert len(blood) == 6 and blood[0] == "Antiplatelet Agent (Cyclooxygenase / ADP)"
 assert blood[-1] == "Antianemic Agent (Iron & Erythropoietin)"
@@ -184,7 +187,7 @@ import drug_db
 import drug_classes as classes
 root = Path(os.environ["RX_APP_DATA_DIR"])
 path = root / "db.csv"
-path.write_text("generic_name\\nImported drug\\n", encoding="utf-8")
+path.write_text("generic_name\\nImported drug\\nSecond drug\\n", encoding="utf-8")
 db = drug_db.DrugDatabase(str(path))
 assert db.update_classification("Imported drug", "blood", "Antiplatelet Agent (Cyclooxygenase / ADP)")
 db.load()
@@ -193,6 +196,12 @@ mapped = [drug.generic_name for drug in db.drugs
           if (found := classes.group_for(drug))
           and found == classes.DrugClass("blood", "Antiplatelet Agent (Cyclooxygenase / ADP)")]
 assert mapped == ["Imported drug"]
+assert db.update_classifications(
+    ["Imported drug", "Second drug"], "gastrointestinal",
+    "PPI (Proton Pump Inhibitor)") == 2
+db.load()
+assert all(drug.therapeutic_group == "gastrointestinal" for drug in db.drugs)
+assert all(drug.detailed_class == "PPI (Proton Pump Inhibitor)" for drug in db.drugs)
 assert config.toggle_favorite_therapeutic_group("blood")
 assert "blood" in Config().favorite_therapeutic_groups()
 assert not config.toggle_favorite_therapeutic_group("blood")
@@ -344,6 +353,15 @@ def test_medication_cards_use_compact_header_actions_without_duplicate_or_hints(
     assert "on_duplicate" not in row_source
     assert "duplicate" not in row_source
     assert "header_actions" in row_source
+    assert "self.drag_handle" in row_source
+    assert 'text="⠿"' in row_source
+    assert "self.up_button" not in row_source
+    assert "self.down_button" not in row_source
+    assert "tk.Menu" in row_source
+    assert "I.t('move_up')" in row_source
+    assert "I.t('move_down')" in row_source
+    assert 'font=("Segoe UI", 16, "bold")' in row_source
+    assert 'bind("<FocusOut>"' not in row_source
     assert 'self.trade_entry.bind("<KeyRelease>", self._on_trade_type)' in row_source
     assert 'self.name_entry.bind("<KeyRelease>", self._on_scientific_type)' not in row_source
     assert "search_prescribable" in inspect.getsource(DrugRow._on_trade_type)
@@ -353,6 +371,82 @@ def test_medication_cards_use_compact_header_actions_without_duplicate_or_hints(
     assert 'I.t("page_patient_help")' not in form_source
     assert 'I.t("page_favorites_help")' not in form_source
     assert 'I.t("page_drug_classes_help")' not in form_source
+
+
+def test_medication_favorite_picker_and_collapsible_line_preview():
+    import inspect
+    import i18n as I
+    from main import App
+
+    form_source = inspect.getsource(App.build_forms)
+    picker_source = inspect.getsource(App.refresh_medication_favorite_picker)
+    preview_source = inspect.getsource(App.render_word_preview)
+    assert "medication_favorites_button" in form_source
+    assert "medication_favorite_search_var" in form_source
+    assert "self.medication_favorite_results = ctk.CTkFrame" in form_source
+    assert "height=170" not in form_source
+    assert "use_favorite_from_medication" in picker_source
+    assert "use_count" in picker_source and 'if favorite.get("pinned")' in picker_source
+    assert "line_row.pack" in preview_source
+    assert 'line = "     ".join(parts)' in preview_source
+    assert "headers =" not in preview_source
+    assert ".grid(" not in preview_source
+    for language in ("en", "ar"):
+        I.set_lang(language)
+        assert I.t("starred_drugs")
+        assert I.t("search_starred_drugs")
+        assert I.t("starred_drugs_empty")
+        assert I.t("show_word_preview")
+        assert I.t("hide_word_preview")
+    I.set_lang("en")
+
+
+def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
+    import inspect
+    import i18n as I
+    from main import App
+
+    form_source = inspect.getsource(App.build_forms)
+    browser_source = inspect.getsource(App.refresh_class_browser)
+    breadcrumb_source = inspect.getsource(App._set_class_breadcrumb)
+    group_page_source = inspect.getsource(App.show_subclass_page)
+    detail_page_source = inspect.getsource(App.show_detail_medicines_page)
+    mapping_source = inspect.getsource(App.show_class_mapping_editor)
+    save_source = inspect.getsource(App.save_class_mapping)
+    integrity_source = inspect.getsource(App.class_mapping_integrity)
+    assert "self.class_breadcrumb" in form_source
+    assert "self.class_group_list" in form_source
+    assert "self.class_detail_list" in form_source
+    assert "self.class_medicine_results" in form_source
+    assert "search_classes_medicines" in form_source
+    assert "review_unclassified" in form_source
+    assert "mapping_integrity" in form_source
+    assert "class_summary_starred" in browser_source
+    assert "class_summary_recent" in browser_source
+    assert "toggle_class_drug_star" in browser_source
+    assert "add_drug_database_item" in browser_source
+    assert 'I.t("drug_classes")' not in breadcrumb_source
+    assert "show_subclass_page" in breadcrumb_source
+    assert "show_detail_medicines_page" in breadcrumb_source
+    assert "show_detail_medicines_page" in group_page_source
+    assert 'bind(\n                "<Double-Button-1>"' in group_page_source
+    assert "back_to_detailed_classes" in detail_page_source
+    assert "_drugs_in_class" in detail_page_source
+    assert "selectmode=tk.EXTENDED" in mapping_source
+    assert "mapping_save_and_next" in mapping_source
+    assert "update_classifications" in save_source
+    assert "invalid_groups" in integrity_source
+    assert "invalid_details" in integrity_source
+    assert "conflicts" in integrity_source
+    for language in ("en", "ar"):
+        I.set_lang(language)
+        for key in ("search_classes_medicines", "review_unclassified",
+                    "mapping_integrity", "save_and_next",
+                    "class_summary_total", "class_summary_starred",
+                    "back_to_detailed_classes", "class_pediatric_preparations",
+                    "class_iv_fluids_devices"):
+            assert I.t(key)
+    I.set_lang("en")
 
 
 def test_prescriber_specialty_uses_editable_localized_selector():
