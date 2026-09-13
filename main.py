@@ -30,7 +30,7 @@ import unicodedata
 import uuid
 import webbrowser
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox
 from typing import List
 
 import customtkinter as ctk
@@ -44,6 +44,7 @@ import i18n as I
 import openfda
 import drug_classes as classes
 import gemini_drug
+from workflow_features import calculate_medicine_quantity, compare_prescriptions
 from patient_history import PatientHistory
 
 ctk.set_appearance_mode("light")
@@ -439,13 +440,15 @@ class DrugRow(ctk.CTkFrame):
         details.pack(fill="x", padx=PAD, pady=(0, 8))
         # Balanced 20% / 20% / 15% / 45% proportions for dosage, frequency,
         # duration and notes.
-        for column, weight in enumerate((4, 4, 3, 9)):
+        for column, weight in enumerate((4, 4, 3, 8, 4)):
             details.grid_columnconfigure(column, weight=weight)
 
         self.dosage_var = tk.StringVar()
         self.freq_var = tk.StringVar()
         self.dur_var = tk.StringVar()
         self.notes_var = tk.StringVar()
+        self.quantity_var = tk.StringVar()
+        self._quantity_manual = False
         self.dosage_entry = self._box(details, 0, I.t("dosage"),
                                       I.t("ph_dosage"), self.dosage_var)
         self.freq_entry = self._frequency_box(details, 1, I.t("frequency"),
@@ -454,6 +457,24 @@ class DrugRow(ctk.CTkFrame):
                                    I.t("ph_duration"), self.dur_var)
         self.notes_entry = self._notes_box(details, 3, I.t("notes"),
                                            self.notes_var)
+        quantity_col = ctk.CTkFrame(details, fg_color="transparent")
+        quantity_col.grid(row=0, column=4, sticky="ew", padx=4)
+        quantity_head = ctk.CTkFrame(quantity_col, fg_color="transparent")
+        quantity_head.pack(fill="x", pady=(0, 2))
+        ctk.CTkLabel(quantity_head, text=I.t("quantity"), anchor="w",
+                     text_color=MUTED, font=ctk.CTkFont(size=10, weight="bold")).pack(
+                         side="left", fill="x", expand=True)
+        ctk.CTkButton(quantity_head, text="↻", width=25, height=22,
+                      fg_color="transparent", text_color=ACCENT,
+                      hover_color=ACCENT_SOFT, command=self.recalculate_quantity).pack(side="right")
+        self.quantity_entry = ctk.CTkEntry(
+            quantity_col, textvariable=self.quantity_var, height=FIELD_HEIGHT,
+            corner_radius=9, border_color=LINE, placeholder_text=I.t("quantity_auto"),
+            font=ctk.CTkFont(size=11), justify="left")
+        self.quantity_entry.pack(fill="x")
+        self.quantity_entry.bind("<KeyRelease>", self._quantity_edited)
+        for variable in (self.dosage_var, self.freq_var, self.dur_var):
+            variable.trace_add("write", lambda *_: self._auto_quantity())
 
         self._reference_drug = ""
         self._reference_display = ""
@@ -670,6 +691,21 @@ class DrugRow(ctk.CTkFrame):
         picker.bind("<KeyRelease>", lambda ev: self.on_change())
         return picker
 
+    def _quantity_edited(self, _event=None):
+        self._quantity_manual = bool(self.quantity_var.get().strip())
+        self.on_change()
+
+    def _auto_quantity(self):
+        if self._quantity_manual:
+            return
+        self.quantity_var.set(calculate_medicine_quantity(
+            self.dosage_var.get(), self.freq_var.get(), self.dur_var.get()))
+
+    def recalculate_quantity(self):
+        self._quantity_manual = False
+        self._auto_quantity()
+        self.on_change()
+
     def set_position(self, number):
         """Keep the number badge accurate after additions and reordering."""
         self.number_badge.configure(text=str(number))
@@ -873,6 +909,7 @@ class DrugRow(ctk.CTkFrame):
             frequency=self.freq_var.get().strip(),
             duration=self.dur_var.get().strip(),
             notes=self.notes_var.get().strip(),
+            quantity=self.quantity_var.get().strip(),
         )
 
 
@@ -905,6 +942,7 @@ class App(ctk.CTk):
         self._favorite_render_limit = 60
         self._favorite_filter_signature = None
         self._word_preview_job = None
+        self._comparison_job = None
         self._favorite_refresh_job = None
         self._class_search_job = None
         self.word_preview_visible = False
@@ -958,6 +996,7 @@ class App(ctk.CTk):
 
         self.content = ctk.CTkFrame(self.workspace, fg_color="transparent")
         self.content.pack(side="left", fill="both", expand=True)
+        self._build_quick_prescribe()
         self.scroll = ctk.CTkScrollableFrame(self.content, fg_color=BG, corner_radius=8)
         self.scroll.pack(fill="both", expand=True)
         # CustomTkinter defaults to 30 px per scroll unit on Windows and then
@@ -1002,6 +1041,140 @@ class App(ctk.CTk):
         self.add_row()
         self.load_profile_into_ui()
         self.show_page("prescriber")
+
+    def _build_quick_prescribe(self):
+        bar = ctk.CTkFrame(self.content, fg_color=CARD, border_color=LINE,
+                           border_width=1, corner_radius=10)
+        bar.pack(fill="x", padx=3, pady=(0, 4))
+        ctk.CTkLabel(bar, text="⌘", width=34, text_color=ACCENT,
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(side="left", padx=(7, 0))
+        self.quick_prescribe_var = tk.StringVar()
+        self.quick_prescribe_entry = ctk.CTkEntry(
+            bar, textvariable=self.quick_prescribe_var,
+            placeholder_text=I.t("quick_prescribe_placeholder"), height=38,
+            border_width=0, fg_color="transparent", font=ctk.CTkFont(size=13))
+        self.quick_prescribe_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self._quick_results = []
+        self._quick_popup = None
+        self._quick_job = None
+        self.quick_prescribe_var.trace_add("write", lambda *_: self._schedule_quick_prescribe())
+        self.quick_prescribe_entry.bind("<Down>", lambda _event: self._quick_move(1))
+        self.quick_prescribe_entry.bind("<Up>", lambda _event: self._quick_move(-1))
+        self.quick_prescribe_entry.bind("<Return>", self._quick_choose)
+        self.quick_prescribe_entry.bind("<Escape>", lambda _event: self._hide_quick_results())
+        self.bind_all("<Control-k>", self._focus_quick_prescribe)
+
+    def _focus_quick_prescribe(self, _event=None):
+        self.quick_prescribe_entry.focus_set()
+        self.quick_prescribe_entry.select_range(0, tk.END)
+        return "break"
+
+    def _schedule_quick_prescribe(self):
+        if self._quick_job is not None:
+            try:
+                self.after_cancel(self._quick_job)
+            except (tk.TclError, ValueError):
+                pass
+        query = self.quick_prescribe_var.get().strip()
+        if len(query) < 2:
+            self._hide_quick_results()
+            return
+        self._quick_job = self.after(160, lambda: self._run_quick_prescribe(query))
+
+    def _run_quick_prescribe(self, query):
+        self._quick_job = None
+        token = self._latest_query_tokens.get("quick", 0) + 1
+        self._latest_query_tokens["quick"] = token
+
+        def worker():
+            needle = query.casefold()
+            results = []
+            for record in self.patient_history.search(query)[:8]:
+                results.append((I.t("quick_patient"), record.get("name", ""), "patient", record))
+            for template in cfg.config.treatment_templates():
+                if needle in template.get("disease", "").casefold():
+                    results.append((I.t("quick_template"), template["disease"], "template", template))
+            for favorite in cfg.config.medication_favorites():
+                name = favorite.get("brand_name") or favorite.get("generic_name", "")
+                if favorite.get("pinned") and needle in name.casefold():
+                    results.append((I.t("quick_starred"), name, "favorite", favorite.get("id", "")))
+            for code in classes.GROUPS:
+                group_name = I.t("class_" + code)
+                if needle in group_name.casefold():
+                    results.append((I.t("quick_class"), group_name, "major", code))
+                for detail in classes.subclasses_for(code):
+                    if needle in detail.casefold():
+                        results.append((I.t("quick_class"), detail, "detail", (code, detail)))
+            return results[:30]
+
+        self.submit_background(
+            worker, lambda results: self._render_quick_results(query, token, results), silent=True)
+
+    def _render_quick_results(self, query, token, results):
+        if token != self._latest_query_tokens.get("quick") or query != self.quick_prescribe_var.get().strip():
+            return
+        self._hide_quick_results()
+        if not results:
+            return
+        top = tk.Toplevel(self)
+        top.wm_overrideredirect(True)
+        top.geometry(f"+{self.quick_prescribe_entry.winfo_rootx()}+{self.quick_prescribe_entry.winfo_rooty() + self.quick_prescribe_entry.winfo_height()}")
+        box = tk.Listbox(top, height=min(10, len(results)), width=76,
+                         font=("Segoe UI", 14), bg="white", fg="#1a302e",
+                         relief="solid", borderwidth=2, selectbackground=ACCENT,
+                         selectforeground="white", activestyle="none")
+        for kind, label, _action, _payload in results:
+            box.insert(tk.END, f"{kind}  ·  {label}")
+        box.pack()
+        box.selection_set(0)
+        box.bind("<Double-Button-1>", self._quick_choose)
+        box.bind("<Return>", self._quick_choose)
+        self._quick_popup, self._quick_listbox, self._quick_results = top, box, results
+
+    def _hide_quick_results(self):
+        if getattr(self, "_quick_popup", None):
+            try:
+                self._quick_popup.destroy()
+            except tk.TclError:
+                pass
+        self._quick_popup = None
+        self._quick_listbox = None
+
+    def _quick_move(self, step):
+        box = getattr(self, "_quick_listbox", None)
+        if not box or not box.size():
+            return "break"
+        selected = box.curselection()
+        index = (selected[0] if selected else 0) + step
+        index = max(0, min(box.size() - 1, index))
+        box.selection_clear(0, tk.END)
+        box.selection_set(index)
+        box.see(index)
+        return "break"
+
+    def _quick_choose(self, _event=None):
+        box = getattr(self, "_quick_listbox", None)
+        selected = box.curselection() if box else ()
+        if not selected or selected[0] >= len(self._quick_results):
+            return "break"
+        _kind, _label, action, payload = self._quick_results[selected[0]]
+        self._hide_quick_results()
+        self.quick_prescribe_var.set("")
+        if action == "patient":
+            self.show_page("patient")
+            self._load_patient_record(payload)
+        elif action == "template":
+            self.show_page("treatment_templates")
+            self._load_treatment_template_record(payload)
+        elif action == "favorite":
+            self.use_favorite(payload)
+        elif action == "major":
+            self.show_page("drug_classes")
+            self.show_subclass_page(payload)
+        elif action == "detail":
+            self.show_page("drug_classes")
+            self.show_detail_medicines_page(*payload)
+        return "break"
 
     def confirm_close(self):
         """Require an explicit confirmation before closing the desktop app."""
@@ -1378,6 +1551,10 @@ class App(ctk.CTk):
         ctk.CTkLabel(prescriptions_panel, text=I.t("previous_prescriptions"), text_color=ACCENT,
                      font=ctk.CTkFont(size=11, weight="bold"), anchor="w").pack(
                          fill="x", pady=(0, 3))
+        self.patient_comparison_body = ctk.CTkFrame(
+            prescriptions_panel, fg_color="#f8fcfb", border_color=LINE,
+            border_width=1, corner_radius=9)
+        self.patient_comparison_body.pack(fill="x", pady=(0, 5))
         self.patient_prescriptions_body = ctk.CTkFrame(
             prescriptions_panel, fg_color="transparent")
         self.patient_prescriptions_body.pack(fill="x")
@@ -1388,6 +1565,7 @@ class App(ctk.CTk):
         self.patient_age_entry.bind("<Return>", lambda _event: self.patient_sex_menu.focus_set())
         self.bind_all("<Control-s>", self._save_patient_shortcut)
         self._show_empty_prescriptions()
+        self.refresh_prescription_comparison()
 
         self.page_header(self.pages["medications"], I.t("medication_entry"), "")
         self.word_preview_visible = False
@@ -1925,154 +2103,6 @@ class App(ctk.CTk):
 
     def _set_treatment_status(self, text, color=MUTED):
         self.treatment_template_status.configure(text=text, text_color=color)
-
-    @staticmethod
-    def _treatment_disease_values():
-        diseases = {
-            item.get("disease", "").strip()
-            for item in cfg.config.treatment_templates()
-            if item.get("disease", "").strip()
-        }
-        return sorted(diseases, key=str.casefold)
-
-    def _restore_treatment_disease_values(self):
-        if hasattr(self, "treatment_disease_entry"):
-            values = self._treatment_disease_values()
-            self.treatment_disease_entry.configure(
-                values=[directional_display_text(value) for value in values] or [""])
-
-    def _filter_treatment_disease_menu(self, event=None):
-        """Autocomplete the disease field from locally saved treatment plans."""
-        if event and event.keysym == "Escape":
-            self._hide_treatment_disease_suggestions()
-            return
-        if event and event.keysym in {
-                "Up", "Down", "Return", "Tab", "Shift_L", "Shift_R",
-                "Control_L", "Control_R", "Alt_L", "Alt_R"}:
-            return
-        logical = strip_bidi_display_controls(self.treatment_disease_var.get()).strip()
-        query = logical.casefold()
-        matches = [value for value in self._treatment_disease_values()
-                   if not query or query in value.casefold()]
-        self.treatment_disease_entry.configure(
-            values=[directional_display_text(value) for value in matches]
-            or [directional_display_text(logical)])
-        if query and matches:
-            self._show_treatment_disease_suggestions(matches)
-        else:
-            self._hide_treatment_disease_suggestions()
-
-    def _show_treatment_disease_suggestions(self, matches):
-        """Open clickable saved-disease matches immediately below the input."""
-        self._hide_treatment_disease_suggestions()
-        matches = sorted(
-            matches,
-            key=lambda value: strip_bidi_display_controls(value).casefold())
-        if not matches:
-            return
-        self.update_idletasks()
-        popup = tk.Toplevel(self)
-        popup.withdraw()
-        popup.wm_overrideredirect(True)
-        try:
-            popup.attributes("-topmost", True)
-        except tk.TclError:
-            pass
-        width = max(340, self.treatment_disease_entry.winfo_width())
-        x = self.treatment_disease_entry.winfo_rootx()
-        anchor_top = self.treatment_disease_entry.winfo_rooty()
-        anchor_bottom = anchor_top + self.treatment_disease_entry.winfo_height()
-        shell = ctk.CTkFrame(
-            popup, fg_color=CARD, border_color=ACCENT,
-            border_width=2, corner_radius=8)
-        shell.pack(fill="both", expand=True)
-        self._treatment_disease_popup = popup
-        self._treatment_disease_suggestion_buttons = []
-        visible_rows = min(len(matches), 5)
-        container = shell
-        is_scrollable = len(matches) > 3
-        if is_scrollable:
-            container = ctk.CTkScrollableFrame(
-                shell, fg_color=CARD, corner_radius=6,
-                scrollbar_button_color=ACCENT,
-                scrollbar_button_hover_color=ACCENT_HOVER)
-            container.pack(fill="both", expand=True, padx=3, pady=3)
-        for index, disease in enumerate(matches):
-            button = ctk.CTkButton(
-                container, text=directional_display_text(disease), height=36,
-                corner_radius=5, fg_color="transparent", text_color="#173b38",
-                hover_color=ACCENT_SOFT, anchor="w",
-                font=ctk.CTkFont(size=13),
-                command=lambda value=disease: self._choose_treatment_disease(value))
-            bottom_inset = 4 if index == len(matches) - 1 else 0
-            button.pack(fill="x", padx=4, pady=(4, bottom_inset))
-            self._treatment_disease_suggestion_buttons.append(button)
-        popup.update_idletasks()
-        screen_height = popup.winfo_screenheight()
-        max_height = max(96, screen_height - 24)
-        if is_scrollable:
-            row_height = max(
-                button.winfo_reqheight()
-                for button in self._treatment_disease_suggestion_buttons) + 8
-            height = min(
-                visible_rows * row_height + 18,
-                max(180, int(screen_height * 0.55)), max_height)
-        else:
-            height = min(max(48, shell.winfo_reqheight() + 12), max_height)
-        below_y = anchor_bottom + 2
-        if below_y + height <= screen_height - 12:
-            y = below_y
-        elif anchor_top - height >= 12:
-            y = anchor_top - height - 2
-        else:
-            y = max(12, min(below_y, screen_height - height - 12))
-        popup.geometry(f"{width}x{height}+{x}+{y}")
-        popup.deiconify()
-        popup.lift()
-
-    def _hide_treatment_disease_suggestions(self):
-        popup = getattr(self, "_treatment_disease_popup", None)
-        self._treatment_disease_popup = None
-        self._treatment_disease_suggestion_buttons = []
-        if popup is not None:
-            try:
-                if popup.winfo_exists():
-                    popup.destroy()
-            except tk.TclError:
-                pass
-
-    def _on_treatment_disease_focus_out(self, _event=None):
-        self._restore_treatment_disease_values()
-        self.after(160, self._hide_treatment_disease_suggestions)
-
-    def _choose_treatment_disease(self, disease):
-        self._hide_treatment_disease_suggestions()
-        self.treatment_disease_var.set(disease)
-        self._select_saved_treatment_disease(disease)
-
-    def _select_saved_treatment_disease(self, value):
-        self._hide_treatment_disease_suggestions()
-        disease = strip_bidi_display_controls(value).strip()
-        matches = [item for item in cfg.config.treatment_templates()
-                   if item.get("disease", "").strip().casefold() == disease.casefold()]
-        if not matches:
-            return
-        template = matches[-1]
-        label = next((label for label, template_id in self._treatment_template_lookup.items()
-                      if template_id == template["id"]), "")
-        if label:
-            self.treatment_template_selector_var.set(label)
-        self._load_treatment_template_record(template)
-
-    def _load_treatment_disease_from_search(self, _event=None):
-        disease = strip_bidi_display_controls(self.treatment_disease_var.get()).strip()
-        exact = [value for value in self._treatment_disease_values()
-                 if value.casefold() == disease.casefold()]
-        candidates = exact or [value for value in self._treatment_disease_values()
-                               if disease.casefold() in value.casefold()]
-        if len(candidates) == 1:
-            self._select_saved_treatment_disease(candidates[0])
-        return "break"
 
     def refresh_treatment_template_menu(self, selected_id=""):
         templates = sorted(
@@ -2626,43 +2656,14 @@ class App(ctk.CTk):
         if not messagebox.askyesno(
                 I.t("treatment_delete"), I.t("treatment_delete_confirm"), parent=self):
             return
+        deleted = next((item for item in cfg.config.treatment_templates()
+                        if item.get("id") == self._treatment_template_id), None)
         cfg.config.remove_treatment_template(self._treatment_template_id)
+        if deleted:
+            cfg.config.add_recovery_item(
+                "template", deleted.get("disease", I.t("treatment_templates")), deleted)
         self.new_treatment_template()
         self._set_treatment_status(I.t("treatment_deleted"), ACCENT)
-
-    def backup_treatment_templates(self):
-        path = filedialog.asksaveasfilename(
-            parent=self, title=I.t("treatment_backup"),
-            defaultextension=".rxtemplates",
-            filetypes=[(I.t("treatment_backup_file"), "*.rxtemplates")])
-        if not path:
-            return
-        try:
-            cfg.config.export_treatment_templates(path)
-        except Exception as exc:
-            logging.exception("Treatment-template backup failed")
-            messagebox.showerror(I.t("treatment_backup"), str(exc), parent=self)
-            return
-        self._set_treatment_status(I.t("treatment_backup_done", path=path), ACCENT)
-
-    def restore_treatment_templates(self):
-        path = filedialog.askopenfilename(
-            parent=self, title=I.t("treatment_restore"),
-            filetypes=[(I.t("treatment_backup_file"), "*.rxtemplates")])
-        if not path:
-            return
-        choice = messagebox.askyesnocancel(
-            I.t("treatment_restore"), I.t("treatment_restore_choice"), parent=self)
-        if choice is None:
-            return
-        try:
-            count = cfg.config.import_treatment_templates(path, replace=bool(choice))
-        except Exception as exc:
-            logging.exception("Treatment-template restore failed")
-            messagebox.showerror(I.t("treatment_restore"), str(exc), parent=self)
-            return
-        self.new_treatment_template()
-        self._set_treatment_status(I.t("treatment_restore_done", n=count), ACCENT)
 
     @staticmethod
     def _treatment_review_rows(templates):
@@ -3048,6 +3049,11 @@ class App(ctk.CTk):
             row.freq_var.set(data.frequency)
             row.dur_var.set(data.duration)
             row.notes_var.set(data.notes)
+            saved_quantity = getattr(data, "quantity", "")
+            row.quantity_var.set(saved_quantity)
+            row._quantity_manual = bool(saved_quantity.strip())
+            if not saved_quantity.strip():
+                row.recalculate_quantity()
         row.pack(fill="x", padx=2, pady=4)
         self.rows.append(row)
         self._number_drug_rows()
@@ -3862,6 +3868,8 @@ class App(ctk.CTk):
                 I.t("favorite_delete_confirm", name=display_name)):
             return
         if cfg.config.remove_medication_favorite(index):
+            self._deleted_favorite_recovery_id = cfg.config.add_recovery_item(
+                "favorite", display_name, {"index": index, "favorite": deleted})
             self._favorite_selected_ids.discard(deleted.get("id", ""))
             self._deleted_favorite = (index, deleted)
             if self.favorite_undo_timer:
@@ -3882,6 +3890,10 @@ class App(ctk.CTk):
             return
         index, favorite = self._deleted_favorite
         cfg.config.insert_medication_favorite(index, favorite)
+        recovery_id = getattr(self, "_deleted_favorite_recovery_id", "")
+        if recovery_id:
+            cfg.config.discard_recovery_item(recovery_id)
+            self._deleted_favorite_recovery_id = ""
         self._expire_favorite_undo()
         self.refresh_favorites_page()
 
@@ -3911,7 +3923,7 @@ class App(ctk.CTk):
         cfg.config.record_medication_favorite_use(index)
         self.show_page("medications")
         drug_fields = {key: favorite.get(key, "") for key in
-                       ("generic_name", "brand_name", "dosage", "frequency", "duration", "notes")}
+                       ("generic_name", "brand_name", "dosage", "frequency", "duration", "notes", "quantity")}
         self.add_row(data=qu.DrugItem(**drug_fields))
 
     def use_selected_favorite(self):
@@ -4734,11 +4746,15 @@ class App(ctk.CTk):
         if not self.pending_class_mapping:
             return False
         medicines, code, detail = self.pending_class_mapping
+        prior_states = self.db.classification_states(medicines)
         current_indices = self.mapping_list.curselection()
         next_index = current_indices[0] if current_indices else 0
         updated = self.db.update_classifications(
             medicines, code, detail, append=self.mapping_keep_existing_var.get())
         if updated:
+            if prior_states:
+                cfg.config.add_recovery_item(
+                    "mapping", I.t("mapping_recovery_label", n=updated), prior_states)
             self._invalidate_database_caches()
             self.mapping_status.configure(
                 text=I.t("class_mapping_batch_saved", n=updated,
@@ -5077,22 +5093,6 @@ class App(ctk.CTk):
             return
         self.back_to_major_groups()
 
-    def select_drug_subclass(self, group_code, detail):
-        """Compatibility entry point: open the chosen detail-class page."""
-        self.show_detail_medicines_page(group_code, detail)
-
-    def select_subclass_drug(self, event=None):
-        selected = self.subclass_drug_list.curselection()
-        self.add_subclass_drug_button.configure(
-            state="normal" if selected and self.subclass_visible_drugs else "disabled")
-
-    def add_selected_subclass_drug(self):
-        selected = self.subclass_drug_list.curselection()
-        if not selected:
-            return
-        drug, _ = self.subclass_visible_drugs[selected[0]]
-        self.add_drug_database_item(drug)
-
     def add_drug_database_item(self, drug):
         """Place a browsed medicine into the first blank prescription row."""
         target = next((row for row in self.rows
@@ -5111,17 +5111,6 @@ class App(ctk.CTk):
     def select_therapeutic_group(self, code):
         """Backward-compatible entry point for selecting the browser group."""
         self.select_class_browser_group(code)
-
-    def select_class_drug(self, event=None):
-        selected = self.class_drug_list.curselection()
-        self.add_class_drug_button.configure(state="normal" if selected else "disabled")
-
-    def add_selected_class_drug(self):
-        selected = self.class_drug_list.curselection()
-        if not selected:
-            return
-        drug, _ = self._class_visible_drugs[selected[0]]
-        self.add_drug_database_item(drug)
 
     def move_row(self, row, direction):
         index = self.rows.index(row)
@@ -5273,6 +5262,58 @@ class App(ctk.CTk):
         ctk.CTkLabel(self.patient_prescriptions_body, text=I.t("previous_prescriptions_empty"),
                      text_color=MUTED, anchor="w", font=ctk.CTkFont(size=10)).pack(fill="x", pady=(2, 4))
 
+    @staticmethod
+    def _history_drug_name(drug):
+        return str(drug.get("brand_name", "") or drug.get("generic_name", "") or "—")
+
+    def refresh_prescription_comparison(self):
+        """Show a live comparison with the selected patient's latest saved Rx."""
+        if not hasattr(self, "patient_comparison_body"):
+            return
+        for child in self.patient_comparison_body.winfo_children():
+            child.destroy()
+        cached = getattr(self, "_current_history_record", None)
+        record = (cached if cached and cached.get("id") == self._loaded_patient_id
+                  else self.patient_history.get(self._loaded_patient_id)
+                  if self._loaded_patient_id else None)
+        current = [row.get_data().__dict__ for row in self.rows
+                   if row.get_data().generic_name or row.get_data().brand_name]
+        prescriptions = list((record or {}).get("prescriptions", []))
+        if not record or not prescriptions or not current:
+            text = I.t("comparison_add_medicines") if record and prescriptions else I.t("comparison_no_previous")
+            ctk.CTkLabel(self.patient_comparison_body, text=text, text_color=MUTED,
+                         anchor="w", font=ctk.CTkFont(size=10)).pack(
+                             fill="x", padx=9, pady=7)
+            return
+        previous = max(prescriptions, key=lambda item: str(item.get("saved_at", "")))
+        result = compare_prescriptions(current, previous.get("drugs", []))
+        ctk.CTkLabel(self.patient_comparison_body, text=I.t("comparison_title"),
+                     text_color=ACCENT, anchor="w",
+                     font=ctk.CTkFont(size=11, weight="bold")).pack(
+                         fill="x", padx=9, pady=(7, 3))
+        styles = {
+            "added": (I.t("comparison_added"), "#e5f6ef", "#176b51"),
+            "removed": (I.t("comparison_removed"), "#fbe9e8", DANGER),
+            "changed": (I.t("comparison_changed"), WARNING_SOFT, WARNING),
+        }
+        shown = False
+        for kind in ("added", "removed", "changed"):
+            label, bg, fg = styles[kind]
+            for item in result[kind]:
+                drug = item.get("after", {}) if kind == "changed" else item
+                suffix = (" · " + ", ".join(item.get("fields", []))) if kind == "changed" else ""
+                ctk.CTkLabel(
+                    self.patient_comparison_body,
+                    text=f"{label}: {self._history_drug_name(drug)}{suffix}",
+                    fg_color=bg, text_color=fg, corner_radius=7, anchor="w",
+                    font=ctk.CTkFont(size=10, weight="bold")).pack(
+                        fill="x", padx=8, pady=2)
+                shown = True
+        if not shown:
+            ctk.CTkLabel(self.patient_comparison_body, text=I.t("comparison_unchanged"),
+                         text_color=ACCENT, anchor="w",
+                         font=ctk.CTkFont(size=10)).pack(fill="x", padx=9, pady=(0, 7))
+
     def select_patient_history(self, event=None):
         selected = self.patient_history_list.curselection()
         if not selected:
@@ -5318,7 +5359,7 @@ class App(ctk.CTk):
                     name = f"{name} ({scientific})"
                 regimen = "  ·  ".join(
                     str(drug.get(key, "")).strip()
-                    for key in ("dosage", "frequency", "duration", "notes")
+                    for key in ("dosage", "frequency", "duration", "notes", "quantity")
                     if str(drug.get(key, "")).strip())
                 line = f"{number}. {name}" + (f" — {regimen}" if regimen else "")
                 ctk.CTkLabel(
@@ -5333,6 +5374,11 @@ class App(ctk.CTk):
                 border_color=LINE, hover_color=ACCENT_SOFT,
                 command=lambda item=prescription, patient=record:
                     self.load_saved_prescription(patient, item)).pack(side="left")
+            ctk.CTkButton(
+                actions, text=I.t("delete_rx"), width=90, height=32,
+                fg_color="transparent", text_color=DANGER, hover_color="#fae9e9",
+                command=lambda item=prescription, patient=record:
+                    self.delete_saved_prescription(patient, item)).pack(side="right")
 
     def toggle_patient_prescription(self, record, prescription_id):
         if prescription_id in self._expanded_prescription_ids:
@@ -5352,6 +5398,7 @@ class App(ctk.CTk):
             messagebox.showinfo(APP_TITLE, str(exc))
             return
         self._loaded_patient_id = str(record.get("id", ""))
+        self._current_history_record = record
         self.patient_delete_button.configure(state="normal")
         self.patient_search_var.set("")
         self.refresh_patient_history()
@@ -5368,6 +5415,22 @@ class App(ctk.CTk):
         self._current_history_record = record
         self._select_patient_record(record.get("id", ""))
         self.show_patient_prescriptions(record)
+        self.refresh_prescription_comparison()
+
+    def delete_saved_prescription(self, patient, prescription):
+        if not messagebox.askyesno(I.t("delete_rx"), I.t("delete_rx_confirm"), parent=self):
+            return
+        deleted = self.patient_history.delete_prescription(
+            str(patient.get("id", "")), str(prescription.get("id", "")))
+        if not deleted:
+            return
+        cfg.config.add_recovery_item(
+            "prescription", self._history_drug_name((deleted.get("drugs") or [{}])[0]),
+            {"patient_id": patient.get("id", ""), "prescription": deleted})
+        record = self.patient_history.get(str(patient.get("id", ""))) or patient
+        self._current_history_record = record
+        self.show_patient_prescriptions(record)
+        self.refresh_prescription_comparison()
 
     def delete_selected_patient(self):
         record = self._selected_or_loaded_patient()
@@ -5376,6 +5439,7 @@ class App(ctk.CTk):
         if not messagebox.askyesno(I.t("delete_patient"), I.t("delete_patient_confirm", name=record.get("name", ""))):
             return
         if self.patient_history.delete(record.get("id", "")):
+            cfg.config.add_recovery_item("patient", record.get("name", ""), record)
             if record.get("id") == self._loaded_patient_id:
                 self.clear_patient_details()
             self.refresh_patient_history()
@@ -5395,6 +5459,7 @@ class App(ctk.CTk):
         self.patient_history_list.selection_clear(0, tk.END)
         self.patient_delete_button.configure(state="disabled")
         self._show_empty_prescriptions()
+        self.refresh_prescription_comparison()
 
     def clear_patient_search(self, event=None):
         self.patient_search_var.set("")
@@ -5417,8 +5482,11 @@ class App(ctk.CTk):
             row.destroy()
         self.rows = []
         for saved_drug in prescription.get("drugs", []):
-            self.add_row(data=qu.DrugItem(**{key: saved_drug.get(key, "") for key in
-                                              ("generic_name", "brand_name", "dosage", "frequency", "duration", "notes")}))
+            self.add_row(data=qu.DrugItem(**{
+                key: saved_drug.get(key, "") for key in
+                ("generic_name", "brand_name", "dosage", "frequency",
+                 "duration", "notes", "quantity")
+            }))
         if not self.rows:
             self.add_row()
         self.show_page("medications")
@@ -5436,6 +5504,7 @@ class App(ctk.CTk):
             messagebox.showinfo(I.t("save_patient_prescription"), str(exc))
             return
         self._loaded_patient_id = str(record.get("id", ""))
+        self._current_history_record = record
         self.patient_search_var.set("")
         self.refresh_patient_history()
         self.show_patient_prescriptions(record)
@@ -5462,6 +5531,17 @@ class App(ctk.CTk):
             except (tk.TclError, ValueError):
                 pass
         self._word_preview_job = self.after(180, self._render_word_preview_now)
+        if self._loaded_patient_id:
+            if self._comparison_job is not None:
+                try:
+                    self.after_cancel(self._comparison_job)
+                except (tk.TclError, ValueError):
+                    pass
+            self._comparison_job = self.after(250, self._render_prescription_comparison_now)
+
+    def _render_prescription_comparison_now(self):
+        self._comparison_job = None
+        self.refresh_prescription_comparison()
 
     def _render_word_preview_now(self):
         self._word_preview_job = None
@@ -5650,21 +5730,6 @@ class App(ctk.CTk):
         self.rows = []
         self._build_ui()
         messagebox.showinfo(I.t("restore"), I.t("msg_backup_restored"))
-
-    def on_profile_change(self, value):
-        if value == "+ New profile…":
-            name = simpledialog.askstring(APP_TITLE, "New profile name:", parent=self)
-            if not name:
-                self.profile_var.set(cfg.config.get("active_profile", "Default"))
-                return
-            cfg.config.save_profile(name, {k: v.get().strip() for k, v in self.doctor_vars.items()})
-            self.profile_menu.configure(values=cfg.config.profile_names() + ["+ New profile…"])
-            self.profile_var.set(name)
-            return
-        doctor = cfg.config.use_profile(value)
-        for key, variable in self.doctor_vars.items():
-            variable.set(doctor.get(key, ""))
-        self._refresh_specialty_values(doctor.get("specialty", ""))
 
     def reload_texts(self):
         for child in list(self.children.values()):
@@ -6030,6 +6095,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ("database", "⌬", "Database"),
         ("gemini", "✦", "Gemini reference"),
         ("security", "▣", "Backup & security"),
+        ("recovery", "↶", "Recovery centre"),
         ("about", "ⓘ", "About"),
     )
 
@@ -6076,6 +6142,7 @@ class SettingsWindow(ctk.CTkToplevel):
             value=bool(cfg.config.get("auto_backup_enabled", False)))
         self.settings_search_var = tk.StringVar()
         self._active_section = "general"
+        self._recovery_page_index = 0
         self._nav_buttons = {}
         self._settings_nav_icons = {}
         self._pages = {}
@@ -6242,6 +6309,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._build_database_page()
         self._build_gemini_page()
         self._build_security_page()
+        self._build_recovery_page()
         self._build_about_page()
 
     def _build_general_page(self):
@@ -6563,8 +6631,122 @@ class SettingsWindow(ctk.CTkToplevel):
             font=ctk.CTkFont(size=18, weight="bold")).grid(
                 row=0, column=0, sticky="ew", padx=18, pady=18)
 
+    def _build_recovery_page(self):
+        page = self._new_page("recovery", I.t("settings_recovery"), "")
+        card = self._card(page, 2, I.t("recovery_recently_deleted"))
+        ctk.CTkLabel(
+            card, text=I.t("recovery_retention"), text_color=MUTED,
+            anchor="w", font=ctk.CTkFont(size=11)).grid(
+                row=1, column=0, sticky="ew", padx=14, pady=(0, 7))
+        self.recovery_items_body = ctk.CTkFrame(
+            card, height=330, fg_color="transparent")
+        self.recovery_items_body.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 10))
+        recovery_nav = ctk.CTkFrame(card, fg_color="transparent")
+        recovery_nav.grid(row=3, column=0, sticky="e", padx=10, pady=(0, 8))
+        ctk.CTkButton(recovery_nav, text=I.t("previous"), width=86, height=28,
+                      fg_color=CARD, text_color=ACCENT, border_width=1,
+                      border_color=LINE, command=lambda: self.change_recovery_page(-1)).pack(
+                          side="left", padx=3)
+        self.recovery_page_label = ctk.CTkLabel(
+            recovery_nav, text="1 / 1", width=60, text_color=MUTED)
+        self.recovery_page_label.pack(side="left", padx=3)
+        ctk.CTkButton(recovery_nav, text=I.t("next_page"), width=86, height=28,
+                      fg_color=CARD, text_color=ACCENT, border_width=1,
+                      border_color=LINE, command=lambda: self.change_recovery_page(1)).pack(
+                          side="left", padx=3)
+        self.refresh_recovery_page()
+
+    def refresh_recovery_page(self):
+        if not hasattr(self, "recovery_items_body"):
+            return
+        for child in self.recovery_items_body.winfo_children():
+            child.destroy()
+        all_items = cfg.config.recovery_items()
+        page_count = max(1, (len(all_items) + 6) // 7)
+        self._recovery_page_index = max(0, min(self._recovery_page_index, page_count - 1))
+        start = self._recovery_page_index * 7
+        items = all_items[start:start + 7]
+        if hasattr(self, "recovery_page_label"):
+            self.recovery_page_label.configure(
+                text=f"{self._recovery_page_index + 1} / {page_count}")
+        if not items:
+            ctk.CTkLabel(self.recovery_items_body, text=I.t("recovery_empty"),
+                         text_color=MUTED, anchor="w").pack(fill="x", padx=8, pady=10)
+            return
+        kind_names = {
+            "favorite": I.t("favorite_drugs"), "template": I.t("treatment_templates"),
+            "patient": I.t("patient_details"), "prescription": I.t("previous_prescriptions"),
+            "mapping": I.t("class_mapping_editor"),
+            "template_database": I.t("settings_treatment_database"),
+        }
+        for item in items:
+            row = ctk.CTkFrame(self.recovery_items_body, fg_color="#f8fcfb",
+                               border_color=LINE, border_width=1, corner_radius=8)
+            row.pack(fill="x", pady=3)
+            text = (f"{kind_names.get(item.get('kind'), item.get('kind', ''))} · "
+                    f"{item.get('label', '')}\n{str(item.get('deleted_at', ''))[:16].replace('T', ' ')}")
+            ctk.CTkLabel(row, text=text, text_color="#244e4b", anchor="w",
+                         justify="left", font=ctk.CTkFont(size=11, weight="bold")).pack(
+                             side="left", fill="x", expand=True, padx=10, pady=7)
+            ctk.CTkButton(
+                row, text=I.t("restore_item"), width=82, height=30,
+                fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                command=lambda item_id=item.get("id", ""): self.restore_recovery_item(item_id)
+            ).pack(side="left", padx=3)
+            ctk.CTkButton(
+                row, text=I.t("delete_permanently"), width=108, height=30,
+                fg_color="transparent", text_color=DANGER, hover_color="#fae9e9",
+                command=lambda item_id=item.get("id", ""): self.delete_recovery_item(item_id)
+            ).pack(side="left", padx=(3, 8))
+
+    def change_recovery_page(self, step):
+        self._recovery_page_index = max(0, self._recovery_page_index + step)
+        self.refresh_recovery_page()
+
+    def restore_recovery_item(self, item_id):
+        item = next((entry for entry in cfg.config.recovery_items()
+                     if entry.get("id") == item_id), None)
+        if not item:
+            return
+        payload, kind = item.get("payload"), item.get("kind")
+        restored = False
+        if kind == "favorite" and isinstance(payload, dict):
+            favorite = payload.get("favorite", payload)
+            restored = cfg.config.insert_medication_favorite(
+                int(payload.get("index", 0)), favorite)
+            self.master.refresh_favorites_page()
+        elif kind == "template" and isinstance(payload, dict):
+            restored = bool(cfg.config.save_treatment_template(payload))
+            self.master.refresh_treatment_template_menu()
+        elif kind == "template_database" and isinstance(payload, list):
+            restored = bool(cfg.config.merge_treatment_templates(payload))
+            self.master.refresh_treatment_template_menu()
+        elif kind == "patient" and isinstance(payload, dict):
+            restored = self.master.patient_history.restore_record(payload)
+            self.master.refresh_patient_history()
+        elif kind == "prescription" and isinstance(payload, dict):
+            restored = self.master.patient_history.restore_prescription(
+                str(payload.get("patient_id", "")), payload.get("prescription", {}))
+            self.master.refresh_patient_history()
+        elif kind == "mapping" and isinstance(payload, list):
+            restored = bool(self.master.db.restore_classification_states(payload))
+            self.master._invalidate_database_caches()
+            self.master.refresh_class_overview()
+        if restored:
+            cfg.config.discard_recovery_item(item_id)
+            self.refresh_recovery_page()
+
+    def delete_recovery_item(self, item_id):
+        if not messagebox.askyesno(
+                I.t("delete_permanently"), I.t("delete_permanently_confirm"), parent=self):
+            return
+        cfg.config.discard_recovery_item(item_id)
+        self.refresh_recovery_page()
+
     def _show_section(self, section):
         self._active_section = section
+        if section == "recovery":
+            self.refresh_recovery_page()
         for key, page in self._pages.items():
             if key == section:
                 page.grid()
@@ -6586,6 +6768,7 @@ class SettingsWindow(ctk.CTkToplevel):
             "database": "drug database medicine import replace remove validate classification",
             "gemini": "gemini api key ai connection quota offline reference",
             "security": "backup restore automatic security encryption local patient",
+            "recovery": "recovery restore deleted favorites templates patients prescriptions mappings",
             "about": "about version diagnostic log data folder privacy",
         }
         matches = []
@@ -6891,6 +7074,8 @@ class SettingsWindow(ctk.CTkToplevel):
                 I.t("settings_remove_treatment_database"),
                 I.t("settings_remove_treatment_confirm"), parent=self):
             return
+        cfg.config.add_recovery_item(
+            "template_database", I.t("settings_treatment_database"), templates)
         cfg.config.data["treatment_templates"] = []
         cfg.config.save()
         self.master.new_treatment_template()
@@ -7009,27 +7194,6 @@ class SettingsWindow(ctk.CTkToplevel):
         folder = cfg.APP_DIR / "backups"
         folder.mkdir(parents=True, exist_ok=True)
         os.startfile(str(folder))
-
-    def open_log(self):
-        cfg.LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        cfg.LOG_PATH.touch(exist_ok=True)
-        os.startfile(str(cfg.LOG_PATH))
-
-    def copy_diagnostics(self):
-        document = cfg.config.get("document_defaults", {})
-        text = "\n".join((
-            f"App: Rx Prescription Printer {cfg.APP_VERSION}",
-            f"Data: {cfg.APP_DIR}", f"Log: {cfg.LOG_PATH}",
-            f"Database: {self.master.db.path}",
-            f"Medicines: {len(self.master.db.drugs)}",
-            f"Paper: {self.paper_var.get()}",
-            f"Document defaults: {document}",
-        ))
-        self.clipboard_clear()
-        self.clipboard_append(text)
-        messagebox.showinfo(
-            I.t("settings_diagnostics"), I.t("settings_diagnostics_copied"), parent=self)
-
 
 class GeminiSettingsWindow(ctk.CTkToplevel):
     """Manage the per-user Gemini key stored in the encrypted app config."""

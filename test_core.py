@@ -437,6 +437,32 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
     I.set_lang("en")
 
 
+def test_retired_ui_and_pdf_paths_are_removed():
+    import inspect
+    import pdf_generator as pdfgen
+    from main import App, SettingsWindow
+
+    for name in (
+            "_treatment_disease_values",
+            "_filter_treatment_disease_menu",
+            "backup_treatment_templates",
+            "restore_treatment_templates",
+            "select_drug_subclass",
+            "select_subclass_drug",
+            "add_selected_subclass_drug",
+            "select_class_drug",
+            "add_selected_class_drug",
+            "on_profile_change"):
+        assert not hasattr(App, name)
+
+    assert not hasattr(SettingsWindow, "open_log")
+    assert not hasattr(SettingsWindow, "copy_diagnostics")
+    assert not hasattr(pdfgen, "_word_medication_columns")
+    pdf_source = inspect.getsource(pdfgen.generate_prescription_pdf)
+    assert "_generate_modern_prescription_pdf" in pdf_source
+    assert "BaseDocTemplate" not in pdf_source
+
+
 def test_arabic_documents_and_markup_characters_render(tmp_path):
     code = '''
 import os

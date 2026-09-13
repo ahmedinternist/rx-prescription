@@ -9,13 +9,14 @@ import threading
 import uuid
 import zipfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict
 
 from security import DataProtectionError, protect, unprotect
 
-APP_VERSION = "4.81.0"
+APP_VERSION = "4.82.0"
+RECOVERY_RETENTION_DAYS = 30
 PAPER_SIZES: Dict[str, tuple[float, float]] = {
     "A5": (420.945, 595.276), "A4": (595.276, 841.889), "Letter": (612.0, 792.0),
 }
@@ -60,6 +61,7 @@ def _default_config() -> Dict[str, Any]:
         "signing_private_key": "",
         "medication_favorites": [],
         "treatment_templates": [],
+        "recovery_bin": [],
         "favorite_therapeutic_groups": [],
         "dosage_presets": [],
         "gemini_enabled": False,
@@ -101,6 +103,7 @@ class Config:
         self.data.setdefault("signing_private_key", "")
         self.data.setdefault("medication_favorites", [])
         self.data.setdefault("treatment_templates", [])
+        self.data.setdefault("recovery_bin", [])
         self.data.setdefault("favorite_therapeutic_groups", [])
         self.data.setdefault("dosage_presets", [])
         self.data.setdefault("gemini_enabled", False)
@@ -150,6 +153,54 @@ class Config:
     def set(self, key: str, value: Any) -> None:
         self.data[key] = value
         self.save()
+
+    # -- recoverable deletion ---------------------------------------------
+    def recovery_items(self) -> list[Dict[str, Any]]:
+        """Return non-expired deleted items, newest first."""
+        now = datetime.now(timezone.utc)
+        kept = []
+        for item in self.data.get("recovery_bin", []):
+            if not isinstance(item, dict):
+                continue
+            try:
+                expires = datetime.fromisoformat(str(item.get("expires_at", "")))
+                if expires.tzinfo is None:
+                    expires = expires.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            if expires > now:
+                kept.append(item)
+        kept.sort(key=lambda item: str(item.get("deleted_at", "")), reverse=True)
+        if kept != self.data.get("recovery_bin", []):
+            self.data["recovery_bin"] = kept
+            self.save()
+        return [dict(item) for item in kept]
+
+    def add_recovery_item(self, kind: str, label: str, payload: Any) -> str:
+        now = datetime.now(timezone.utc)
+        item = {
+            "id": uuid.uuid4().hex,
+            "kind": str(kind),
+            "label": str(label).strip() or str(kind),
+            "deleted_at": now.isoformat(timespec="seconds"),
+            "expires_at": (now + timedelta(days=RECOVERY_RETENTION_DAYS)).isoformat(
+                timespec="seconds"),
+            "payload": payload,
+        }
+        items = self.recovery_items()
+        items.insert(0, item)
+        self.data["recovery_bin"] = items[:250]
+        self.save()
+        return item["id"]
+
+    def discard_recovery_item(self, item_id: str) -> bool:
+        items = self.recovery_items()
+        kept = [item for item in items if item.get("id") != item_id]
+        if len(kept) == len(items):
+            return False
+        self.data["recovery_bin"] = kept
+        self.save()
+        return True
 
     @property
     def paper_size(self) -> str:
@@ -342,7 +393,7 @@ class Config:
             medicine = {
                 key: str(raw.get(key, "")).strip()
                 for key in ("generic_name", "brand_name", "dosage", "frequency",
-                            "duration", "notes")
+                            "duration", "notes", "quantity")
             }
             medicine["alternative_to_previous"] = bool(
                 raw.get("alternative_to_previous", False)) and bool(medications)

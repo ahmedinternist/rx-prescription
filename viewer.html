@@ -156,7 +156,7 @@ async function render(p){
   if(drugs.length){
     const medicationColumns = [
       ['dosage', 'Dosage'], ['frequency', 'Frequency'],
-      ['duration', 'Duration'], ['notes', 'Notes']
+      ['duration', 'Duration'], ['notes', 'Notes'], ['quantity', 'Quantity']
     ].filter(([key]) => drugs.some(m => String(m[key] || '').trim()));
     html += '<table><thead><tr><th>#</th><th>Drug</th>'+
             medicationColumns.map(([, label]) => `<th>${label}</th>`).join('')+

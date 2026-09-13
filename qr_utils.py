@@ -65,6 +65,7 @@ class DrugItem:
     frequency: str = ""
     duration: str = ""
     notes: str = ""
+    quantity: str = ""
 
 
 @dataclass
@@ -110,7 +111,7 @@ class Prescription:
                 item["generic_name"] = drug.generic_name
             if drug.brand_name:
                 item["brand_name"] = drug.brand_name
-            for field_name in ("dosage", "frequency", "duration", "notes"):
+            for field_name in ("dosage", "frequency", "duration", "notes", "quantity"):
                 value = getattr(drug, field_name)
                 if value:
                     item[field_name] = value

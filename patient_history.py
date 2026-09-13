@@ -123,7 +123,8 @@ class PatientHistory:
             if not (generic_name or brand_name):
                 continue
             clean_drugs.append({key: str(drug.get(key, "")).strip() for key in
-                                ("generic_name", "brand_name", "dosage", "frequency", "duration", "notes")})
+                                ("generic_name", "brand_name", "dosage", "frequency",
+                                 "duration", "notes", "quantity")})
         if not clean_drugs:
             raise ValueError("Add at least one medicine before saving a prescription.")
         records = self._load()
@@ -150,3 +151,47 @@ class PatientHistory:
             return False
         self._save(kept)
         return True
+
+    def restore_record(self, record: dict[str, Any]) -> bool:
+        """Restore one previously deleted patient without duplicating its ID."""
+        if not isinstance(record, dict) or not record.get("id") or not record.get("name"):
+            return False
+        records = self._load()
+        records = [item for item in records if item.get("id") != record.get("id")]
+        restored = dict(record)
+        restored["updated_at"] = datetime.now(timezone.utc).isoformat()
+        restored.setdefault("prescriptions", [])
+        records.append(restored)
+        self._save(records)
+        return True
+
+    def delete_prescription(self, record_id: str, prescription_id: str) -> dict[str, Any] | None:
+        records = self._load()
+        for record in records:
+            if record.get("id") != record_id:
+                continue
+            prescriptions = record.get("prescriptions", [])
+            deleted = next((item for item in prescriptions
+                            if item.get("id") == prescription_id), None)
+            if deleted is None:
+                return None
+            record["prescriptions"] = [item for item in prescriptions
+                                       if item.get("id") != prescription_id]
+            record["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._save(records)
+            return dict(deleted)
+        return None
+
+    def restore_prescription(self, record_id: str, prescription: dict[str, Any]) -> bool:
+        records = self._load()
+        for record in records:
+            if record.get("id") != record_id:
+                continue
+            items = record.setdefault("prescriptions", [])
+            if any(item.get("id") == prescription.get("id") for item in items):
+                return False
+            items.append(dict(prescription))
+            record["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._save(records)
+            return True
+        return False

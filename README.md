@@ -41,9 +41,9 @@ The output is `dist/RxPrescription.exe`. Building requires a full Windows
 Python installation with Tcl/Tk; the script stops early if Tk cannot open.
 
 ## Safety, privacy, and QR verification
-- The application does **not** store patient prescriptions or history. It stores
-  clinic/doctor preferences and its signing key using Windows DPAPI, tied to the
-  current Windows account.
+- Patient records and explicitly saved prescription snapshots remain local and
+  are protected with Windows DPAPI for the current Windows account. They are
+  never uploaded by the app.
 - Prescription fields are validated before export. Duplicate medicines and
   overly dense QR codes require an explicit confirmation.
 - New QR payloads are signed with an ES256 clinic-local key. To display
@@ -62,28 +62,36 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
 - **Prescriber + Patient** shown **side by side** in a compact layout (no fixed
   lengths). Prescriber: name, license No., specialty. Patient: name, age, sex.
 - **Medications** — repeatable rows. Each row shows the **drug name on top**
-  with **Dosage / Frequency / Duration / Notes** boxes directly beneath it.
+  with **Dosage / Frequency / Duration / Notes / Quantity** directly beneath it.
   Autocomplete from an importable drug database; no fixed drug limit.
+- **Quick prescribing** — press `Ctrl+K` to search patients, treatment templates,
+  starred medicines, and drug classes from one keyboard-friendly command box.
+- **History comparison** — a loaded patient's current medicines are compared
+  with the latest saved prescription, highlighting additions, removals, and changes.
+- **Recovery centre** — deleted favorites, templates, patients, prescriptions,
+  and class mappings can be restored for 30 days from Settings.
 - **Paper size**: A5 / A4 / Letter (whole layout adapts).
 - **Outputs**:
   - **Preview / Print** — full prescription PDF (prescriber, patient, drug
     table, QR).
-  - **Medication Label** — a compact **Word (.docx)** file containing the **full
-    medication content** (drug, dosage, frequency, duration, notes) and the QR
-    code placed a few lines **above the bottom-right corner** (not flush in the
-    corner). The QR still encodes the FULL prescription, so scanning it shows
-    prescriber/patient/date/Rx too.
-  - **Export Word** — fully editable `.docx` of the full prescription.
+  - **Prescription Word Doc Without Header** — a compact editable `.docx`
+    containing the numbered medication lines and QR code without the clinic
+    header.
+  - **Prescription Word Doc With Header** — a fully editable `.docx` containing
+    the clinic header, prescriber and patient details, numbered medication lines,
+    and QR code.
 - **Arabic** renders correctly (RTL shaping via arabic-reshaper + python-bidi;
   Tahoma/Arial font on Windows).
 
 ## Drug database (autocomplete + import)
 - Ships with `data/drugs.csv` (27 common drugs); copied to AppData on first run.
-- **Import / Replace**: `Import DB…` → any CSV **or Excel (.xls / .xlsx)**. REQUIRED
+- **Import / Replace**: **Settings → Database → Import Database** → any CSV or
+  Excel (`.xls` / `.xlsx`). The required
   column is the drug name (header `generic_name`, `generic`, `scientific_name`, `inn`,
   or `name`). Optional: `brand_name`, `strength`, `form`, `category`, `notes`.
 - **Merge**: choose "No" to keep existing drugs and add new ones.
-- **Export**: `Export DB…` saves the current DB to CSV.
+- **Export**: **Settings → Database → Export Database** saves the current database
+  as CSV, XLSX, or legacy XLS.
 
 ## QR payload & viewer
 - Format: `base64url(zlib(json))` shaped as `<viewer_base_url>#<payload>`.

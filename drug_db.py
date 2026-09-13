@@ -600,6 +600,33 @@ class DrugDatabase:
             self.load()
         return updated
 
+    def classification_states(self, names) -> list[Dict[str, str]]:
+        """Capture classification fields so a mapping change can be recovered."""
+        wanted = {_norm(str(name)) for name in names if str(name).strip()}
+        return [{key: value for key, value in drug.to_dict().items()
+                 if key in {"generic_name", "therapeutic_group", "detailed_class",
+                            "class_mappings", "mapping_status"}}
+                for drug in self.drugs if _norm(drug.generic_name) in wanted]
+
+    def restore_classification_states(self, states) -> int:
+        saved = {_norm(str(item.get("generic_name", ""))): item
+                 for item in states if isinstance(item, dict) and item.get("generic_name")}
+        if not saved:
+            return 0
+        drugs = list(self.drugs)
+        updated = 0
+        for drug in drugs:
+            state = saved.get(_norm(drug.generic_name))
+            if not state:
+                continue
+            for key in ("therapeutic_group", "detailed_class", "class_mappings", "mapping_status"):
+                setattr(drug, key, str(state.get(key, "")))
+            updated += 1
+        if updated:
+            self._write(drugs)
+            self.load()
+        return updated
+
     @staticmethod
     def _stored_class_pairs(drug: Drug) -> List[tuple[str, str]]:
         pairs: List[tuple[str, str]] = []
