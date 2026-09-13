@@ -14,6 +14,7 @@ from typing import Optional
 class DrugClass:
     code: str
     detail: str
+    confidence: str = "confirmed"
 
 
 GROUPS = (
@@ -42,6 +43,10 @@ SUBCLASSES = {
         "Antidiarrheal & Motility Inhibitor",
         "Probiotic, Prebiotic & ORS",
         "Intestinal Anti-inflammatory (IBD)",
+        "Bile Acid Sequestrant",
+        "Herbal",
+        "Hemorrhoid and Fissure",
+        "Other",
     ),
     "endocrine_nutrition": (
         "Thyroid Replacement Hormone",
@@ -56,6 +61,9 @@ SUBCLASSES = {
         "Insulin: Rapid & Short-Acting",
         "Insulin: Intermediate & Long-Acting (Basal)",
         "Vitamins & Mineral Supplements",
+        "Dopamine Receptor Antagonist",
+        "Obesity Drugs",
+        "Other",
     ),
     "cardiovascular_blood": (
         "ACE Inhibitor (ACEI)",
@@ -73,6 +81,10 @@ SUBCLASSES = {
         "Lipid-Lowering: Fibrate",
         "Nitrates & Direct Vasodilators",
         "Cardiac Glycosides & Antiarrhythmics",
+        "Central Alpha-2 Agonist",
+        "Venotonic & Vasoprotective",
+        "Carbonic Anhydrase Inhibitor",
+        "Other",
     ),
     "blood": (
         "Antiplatelet Agent (Cyclooxygenase / ADP)",
@@ -81,6 +93,7 @@ SUBCLASSES = {
         "Anticoagulant: Vitamin K Antagonist (VKA)",
         "Hemostatic & Antifibrinolytic",
         "Antianemic Agent (Iron & Erythropoietin)",
+        "Other",
     ),
     "antiinfectives": (
         "Aminopenicillins & Beta-Lactamase Inhibitors",
@@ -99,6 +112,7 @@ SUBCLASSES = {
         "Antiviral: Direct-Acting Anti-HCV & Antiretroviral",
         "Anthelmintics & Scabicides",
         "Antimalarial Chemotherapy",
+        "Other",
     ),
     "pain_musculoskeletal": (
         "NSAID: Non-Selective",
@@ -108,6 +122,10 @@ SUBCLASSES = {
         "Bisphosphonates & Bone Metabolism Agents",
         "Analgesic & Antipyretic (Non-Opioid)",
         "Opioid Analgesic:",
+        "DMARD",
+        "Joint Supplement",
+        "Topical Analgesics",
+        "Other",
     ),
     "neuro_mental_health": (
         "Benzodiazepines & Z-Drugs",
@@ -116,6 +134,10 @@ SUBCLASSES = {
         "SNRI & NaSSA",
         "Tricyclic",
         "Dopaminergics & Cognitive Enhancers",
+        "Antiepileptic",
+        "Vitamins & Supplements",
+        "AntiMigraine",
+        "Other",
     ),
     "respiratory_allergy_ent": (
         "Nasal Decongestant & Saline Wash",
@@ -129,6 +151,9 @@ SUBCLASSES = {
         "Leukotriene Receptor Antagonists (LTRA)",
         "Cough Suppressants & Antitussives",
         "Mucolytics & Expectorants",
+        "Theophylline (Methylxanthine)",
+        "Antifibrotic",
+        "Other",
     ),
     "skin_eye_ear": (
         "Topical Antifungal & Antibacterial",
@@ -139,6 +164,10 @@ SUBCLASSES = {
         "Ophthalmic Anti-Allergic & Artificial Tears",
         "Antiglaucoma Preparations (Prostaglandin & Beta-blocker)",
         "Otic Analgesic, Antibiotic & Ceruminolytic",
+        "Oral Retinoid",
+        "Scabicidal",
+        "Hair Tonics",
+        "Other",
     ),
     "genitourinary_reproductive": (
         "BPH Agent: Alpha-1 Blocker",
@@ -149,6 +178,10 @@ SUBCLASSES = {
         "Progestin-Only Formulation (POP & Implant/Depot)",
         "Emergency Contraceptive",
         "Vaginal Antifungal & Antimicrobial",
+        "Vitamins & Mineral Supplements",
+        "Chemolytic",
+        "Sex Hormones",
+        "Other",
     ),
     "pediatric_preparations": (
         "Pediatric Preparations",
@@ -156,6 +189,12 @@ SUBCLASSES = {
     "iv_fluids_devices": (
         "IV Fluids & Devices",
     ),
+}
+
+# Every class picker and class-browser page uses the same predictable A-Z order.
+SUBCLASSES = {
+    code: tuple(sorted(dict.fromkeys(details), key=str.casefold))
+    for code, details in SUBCLASSES.items()
 }
 
 # Seed-database mapping. New or imported data can supply therapeutic_group and
@@ -231,14 +270,48 @@ def classify(name: str, category: str = "", therapeutic_group: str = "",
         return DrugClass(explicit_group, detailed_class.strip() or category.strip() or "Class not specified")
     mapped = _NAMES.get(name.casefold().strip())
     if mapped:
-        return DrugClass(*mapped)
+        return DrugClass(*mapped, confidence="suggested")
     mapped = _CATEGORY_HINTS.get(category.casefold().strip())
-    return DrugClass(*mapped) if mapped else None
+    return DrugClass(*mapped, confidence="suggested") if mapped else None
+
+
+def groups_for(drug) -> tuple[DrugClass, ...]:
+    """Return every explicit mapping, or one built-in suggestion when unmapped."""
+    pairs: list[tuple[str, str]] = []
+    for item in str(getattr(drug, "class_mappings", "") or "").split("|"):
+        group, separator, detail = item.partition("::")
+        group, detail = group.strip(), detail.strip()
+        if not separator or not group or not detail:
+            continue
+        normalized = classify(
+            getattr(drug, "generic_name", ""), getattr(drug, "category", ""),
+            group, detail)
+        pair = (normalized.code, normalized.detail) if normalized else (group, detail)
+        if pair not in pairs:
+            pairs.append(pair)
+    legacy_group = str(getattr(drug, "therapeutic_group", "") or "").strip()
+    legacy_detail = str(getattr(drug, "detailed_class", "") or "").strip()
+    if legacy_group:
+        normalized = classify(
+            getattr(drug, "generic_name", ""), getattr(drug, "category", ""),
+            legacy_group, legacy_detail)
+        if normalized:
+            pair = (normalized.code, normalized.detail)
+            if pair not in pairs:
+                pairs.insert(0, pair)
+    if pairs:
+        status = str(getattr(drug, "mapping_status", "") or "confirmed").casefold()
+        confidence = status if status in {"confirmed", "suggested"} else "confirmed"
+        return tuple(DrugClass(group, detail, confidence) for group, detail in pairs)
+    suggested = classify(
+        getattr(drug, "generic_name", ""), getattr(drug, "category", ""))
+    return (suggested,) if suggested else ()
 
 
 def group_for(drug) -> Optional[DrugClass]:
     """Classify a drug_db.Drug without importing drug_db (avoids a cycle)."""
-    return classify(drug.generic_name, drug.category, drug.therapeutic_group, drug.detailed_class)
+    found = groups_for(drug)
+    return found[0] if found else None
 
 
 def subclasses_for(group_code: str) -> tuple[str, ...]:

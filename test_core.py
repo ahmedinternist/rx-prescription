@@ -116,63 +116,66 @@ assert classes.group_for(drug) == classes.DrugClass("antiinfectives", "Penicilli
 exported = root / "export.csv"
 db.export_csv(str(exported))
 assert "therapeutic_group" in exported.read_text(encoding="utf-8")
+assert "class_mappings" in exported.read_text(encoding="utf-8")
+assert "mapping_status" in exported.read_text(encoding="utf-8")
 assert classes.classify("Ibuprofen", "NSAID").code == "pain_musculoskeletal"
-assert classes.subclasses_for("gastrointestinal") == (
-    "PPI (Proton Pump Inhibitor)", "H2-Receptor Antagonist (H2RA)",
-    "Antacid & Mucosal Protectant", "Antiflatulent & Digestive Enzymes",
-    "Antispasmodic & IBS Agent", "Antiemetic & Prokinetic",
-    "Laxative: Osmotic & Bulking", "Laxative: Stimulant & Stool Softener",
-    "Antidiarrheal & Motility Inhibitor", "Probiotic, Prebiotic & ORS",
-    "Intestinal Anti-inflammatory (IBD)")
+assert classes.classify("Ibuprofen", "NSAID").confidence == "suggested"
+for code in classes.GROUPS:
+    details = classes.subclasses_for(code)
+    assert details == tuple(sorted(details, key=str.casefold))
+for code in classes.GROUPS:
+    details = classes.subclasses_for(code)
+    if code not in {"antiinfectives", "pediatric_preparations", "iv_fluids_devices"}:
+        assert "Other" in details
+assert classes.subclasses_for("antiinfectives").count("Other") == 1
+assert "Other" not in classes.subclasses_for("pediatric_preparations")
+assert "Other" not in classes.subclasses_for("iv_fluids_devices")
+gastro = classes.subclasses_for("gastrointestinal")
+assert len(gastro) == 15
+assert {"Bile Acid Sequestrant", "Herbal", "Hemorrhoid and Fissure", "Other"}.issubset(gastro)
 assert classes.classify("Omeprazole", "PPI").detail == "PPI (Proton Pump Inhibitor)"
-assert classes.subclasses_for("endocrine_nutrition") == (
-    "Thyroid Replacement Hormone", "Antithyroid Agent (Thionamides)",
-    "Systemic Glucocorticoids", "Antidiabetic: Biguanides",
-    "Antidiabetic: Sulfonylureas", "Antidiabetic: DPP-4 Inhibitors (Gliptins)",
-    "Antidiabetic: SGLT2 Inhibitors (Gliflozins)", "Antidiabetic: GLP-1 Receptor Agonists",
-    "Antidiabetic: Thiazolidinediones (TZD)", "Insulin: Rapid & Short-Acting",
-    "Insulin: Intermediate & Long-Acting (Basal)", "Vitamins & Mineral Supplements")
+endocrine = classes.subclasses_for("endocrine_nutrition")
+assert len(endocrine) == 15
+assert {"Dopamine Receptor Antagonist", "Obesity Drugs", "Other"}.issubset(endocrine)
 assert classes.classify("Metformin", "antidiabetic").detail == "Antidiabetic: Biguanides"
 cardio = classes.subclasses_for("cardiovascular_blood")
-assert len(cardio) == 15 and cardio[0] == "ACE Inhibitor (ACEI)"
-assert cardio[-1] == "Cardiac Glycosides & Antiarrhythmics"
+assert len(cardio) == 19
+assert "Central Alpha-2 Agonist" in cardio
+assert "Venotonic & Vasoprotective" in cardio
+assert "Carbonic Anhydrase Inhibitor" in cardio
+assert "Other" in cardio
 assert classes.classify("Amlodipine", "antihypertensive").detail == "CCB: Dihydropyridine (Peripheral Vasodilator)"
 antiinfectives = classes.subclasses_for("antiinfectives")
-assert len(antiinfectives) == 16
-assert antiinfectives[0] == "Aminopenicillins & Beta-Lactamase Inhibitors"
-assert antiinfectives[-1] == "Antimalarial Chemotherapy"
+assert len(antiinfectives) == 17 and "Other" in antiinfectives
 assert classes.classify("Ceftriaxone", "antibiotic").detail == "Cephalosporins: 3rd & 4th Generation"
 pain = classes.subclasses_for("pain_musculoskeletal")
-assert len(pain) == 7 and pain[0] == "NSAID: Non-Selective"
-assert pain[-1] == "Opioid Analgesic:"
+assert len(pain) == 11
+assert {"DMARD", "Joint Supplement", "Topical Analgesics", "Other"}.issubset(pain)
 assert classes.classify("Paracetamol", "analgesic").detail == "Analgesic & Antipyretic (Non-Opioid)"
 neurology = classes.subclasses_for("neuro_mental_health")
-assert len(neurology) == 6 and neurology[0] == "Benzodiazepines & Z-Drugs"
-assert neurology[-1] == "Dopaminergics & Cognitive Enhancers"
+assert len(neurology) == 10
+assert {"Antiepileptic", "Vitamins & Supplements", "AntiMigraine", "Other"}.issubset(neurology)
 assert classes.classify("Diazepam", "benzodiazepine").detail == "Benzodiazepines & Z-Drugs"
 respiratory = classes.subclasses_for("respiratory_allergy_ent")
-assert len(respiratory) == 11
-assert respiratory[0] == "Nasal Decongestant & Saline Wash"
-assert respiratory[-1] == "Mucolytics & Expectorants"
+assert len(respiratory) == 14
+assert {"Theophylline (Methylxanthine)", "Antifibrotic", "Other"}.issubset(respiratory)
 assert classes.classify("Salbutamol", "bronchodilator").detail == "SABA (Short-Acting Beta-2 Agonist)"
 skin_eye_ear = classes.subclasses_for("skin_eye_ear")
-assert len(skin_eye_ear) == 8
-assert skin_eye_ear[0] == "Topical Antifungal & Antibacterial"
-assert skin_eye_ear[-1] == "Otic Analgesic, Antibiotic & Ceruminolytic"
+assert len(skin_eye_ear) == 12
+assert {"Oral Retinoid", "Scabicidal", "Hair Tonics", "Other"}.issubset(skin_eye_ear)
 genitourinary = classes.subclasses_for("genitourinary_reproductive")
-assert len(genitourinary) == 8
-assert genitourinary[0] == "BPH Agent: Alpha-1 Blocker"
-assert genitourinary[-1] == "Vaginal Antifungal & Antimicrobial"
+assert len(genitourinary) == 12
+assert {"Vitamins & Mineral Supplements", "Chemolytic", "Sex Hormones", "Other"}.issubset(genitourinary)
 all_classes = classes.all_subclasses()
-assert len(all_classes) == 102
-assert all_classes[0] == ("gastrointestinal", "PPI (Proton Pump Inhibitor)")
+assert len(all_classes) == 134
+assert all_classes[0] == ("gastrointestinal", "Antacid & Mucosal Protectant")
 assert all_classes[-2] == ("pediatric_preparations", "Pediatric Preparations")
 assert all_classes[-1] == ("iv_fluids_devices", "IV Fluids & Devices")
 assert classes.classify("Pediatric syrup", therapeutic_group="pediatric_fluids").code == "pediatric_preparations"
 assert classes.classify("Normal saline IV fluid", therapeutic_group="pediatric_fluids").code == "iv_fluids_devices"
 blood = classes.subclasses_for("blood")
-assert len(blood) == 6 and blood[0] == "Antiplatelet Agent (Cyclooxygenase / ADP)"
-assert blood[-1] == "Antianemic Agent (Iron & Erythropoietin)"
+assert len(blood) == 7 and blood[0] == "Antianemic Agent (Iron & Erythropoietin)"
+assert blood[-1] == "Other"
 assert classes.classify("Aspirin", "antiplatelet").code == "blood"
 '''
     run_isolated(tmp_path, code)
@@ -200,14 +203,238 @@ assert db.update_classifications(
     ["Imported drug", "Second drug"], "gastrointestinal",
     "PPI (Proton Pump Inhibitor)") == 2
 db.load()
-assert all(drug.therapeutic_group == "gastrointestinal" for drug in db.drugs)
-assert all(drug.detailed_class == "PPI (Proton Pump Inhibitor)" for drug in db.drugs)
+assert all(any(mapping.code == "gastrointestinal" and
+               mapping.detail == "PPI (Proton Pump Inhibitor)"
+               for mapping in classes.groups_for(drug)) for drug in db.drugs)
+assert len(classes.groups_for(db.find_exact("Imported drug"))) == 2
+assert all(drug.mapping_status == "confirmed" for drug in db.drugs)
 assert config.toggle_favorite_therapeutic_group("blood")
 assert "blood" in Config().favorite_therapeutic_groups()
 assert not config.toggle_favorite_therapeutic_group("blood")
 assert "blood" not in Config().favorite_therapeutic_groups()
 '''
     run_isolated(tmp_path, code)
+
+
+def test_treatment_templates_are_encrypted_local_reusable_regimens(tmp_path):
+    code = '''
+from config import CONFIG_PATH, Config, config
+template_id = config.save_treatment_template({
+    "disease": "Hypertension",
+    "variant": "Initial therapy",
+    "medications": [{
+        "brand_name": "Brand A", "generic_name": "Drug A",
+        "dosage": "5 mg", "frequency": "1x1 (OD / QD)",
+        "duration": "30 days", "notes": "After food",
+    }, {
+        "brand_name": "Brand B", "generic_name": "Drug B",
+        "alternative_to_previous": True,
+    }],
+})
+assert template_id
+saved = Config().treatment_templates()
+assert len(saved) == 1
+assert saved[0]["disease"] == "Hypertension"
+assert saved[0]["variant"] == "Initial therapy"
+assert saved[0]["medications"][0]["generic_name"] == "Drug A"
+assert saved[0]["medications"][1]["alternative_to_previous"] is True
+assert "Hypertension" not in CONFIG_PATH.read_text(encoding="utf-8")
+saved[0]["medications"][0]["dosage"] = "10 mg"
+assert config.save_treatment_template(saved[0]) == template_id
+assert Config().treatment_templates()[0]["medications"][0]["dosage"] == "10 mg"
+backup = CONFIG_PATH.parent / "templates.rxtemplates"
+config.export_treatment_templates(str(backup))
+assert "Hypertension" not in backup.read_text(encoding="utf-8")
+assert config.remove_treatment_template(template_id)
+assert Config().treatment_templates() == []
+assert config.import_treatment_templates(str(backup), replace=True) == 1
+restored = Config().treatment_templates()[0]
+assert restored["variant"] == "Initial therapy"
+assert restored["medications"][1]["alternative_to_previous"] is True
+'''
+    run_isolated(tmp_path, code)
+
+
+def test_treatment_template_xlsx_import_updates_matching_diseases(tmp_path):
+    code = '''
+from pathlib import Path
+from openpyxl import Workbook
+from config import Config, config
+from main import App
+
+path = Path(__import__("os").environ["RX_APP_DATA_DIR"]) / "templates.xlsx"
+workbook = Workbook()
+sheet = workbook.active
+sheet.append([
+    "Disease / indication", "Step", "Relationship", "Generic / trade name",
+    "Scientific name", "Dosage", "Frequency", "Duration", "Notes"])
+sheet.append(["Asthma", 1, "Standard", "Ventolin", "Salbutamol",
+              "2 puffs", "PRN", "", "With spacer"])
+sheet.append(["Asthma", 2, "OR", "Bricanyl", "Terbutaline",
+              "1 puff", "PRN", "", ""])
+sheet.append(["Diabetes", 1, "Standard", "Glucophage", "Metformin",
+              "500 mg", "1x2 (BID)", "30 days", "With food"])
+workbook.save(path)
+
+templates = App._read_treatment_templates_xlsx(path)
+assert [item["disease"] for item in templates] == ["Asthma", "Diabetes"]
+assert templates[0]["medications"][1]["alternative_to_previous"] is True
+assert config.merge_treatment_templates(templates) == 2
+saved = Config().treatment_templates()
+assert len(saved) == 2
+assert saved[0]["medications"][0]["brand_name"] == "Ventolin"
+
+templates[0]["medications"][0]["dosage"] = "4 puffs"
+assert config.merge_treatment_templates([templates[0]]) == 1
+updated = Config().treatment_templates()
+assert len(updated) == 2
+asthma = next(item for item in updated if item["disease"] == "Asthma")
+assert asthma["medications"][0]["dosage"] == "4 puffs"
+'''
+    run_isolated(tmp_path, code)
+
+
+def test_drug_and_treatment_databases_support_csv_xlsx_and_xls(tmp_path):
+    code = '''
+import csv
+from pathlib import Path
+from openpyxl import Workbook
+import xlwt
+import drug_db
+from main import App
+
+root = Path(__import__("os").environ["RX_APP_DATA_DIR"])
+seed = root / "seed.csv"
+seed.write_text(
+    "generic_name,brand_name,strength\\nMetformin,Glucophage,500 mg\\n",
+    encoding="utf-8")
+database = drug_db.DrugDatabase(str(seed))
+for extension in (".csv", ".xlsx", ".xls"):
+    exported = root / f"drug-export{extension}"
+    database.export_file(str(exported))
+    rows = drug_db._read_rows(exported)
+    assert rows[0]["generic_name"] == "Metformin"
+    assert rows[0]["brand_name"] == "Glucophage"
+
+headers = ["Disease / indication", "Step", "Relationship",
+           "Generic / trade name", "Scientific name", "Dosage",
+           "Frequency", "Duration", "Notes"]
+values = ["Diabetes", 1, "Standard", "Glucophage", "Metformin",
+          "500 mg", "1x2 (BID)", "30 days", "With food"]
+
+csv_path = root / "plans.csv"
+with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+    writer = csv.writer(handle)
+    writer.writerow(headers)
+    writer.writerow(values)
+
+xlsx_path = root / "plans.xlsx"
+workbook = Workbook()
+sheet = workbook.active
+sheet.append(headers)
+sheet.append(values)
+workbook.save(xlsx_path)
+
+xls_path = root / "plans.xls"
+workbook = xlwt.Workbook(encoding="utf-8")
+sheet = workbook.add_sheet("Treatment Templates")
+for column, value in enumerate(headers):
+    sheet.write(0, column, value)
+for column, value in enumerate(values):
+    sheet.write(1, column, value)
+workbook.save(str(xls_path))
+
+for source in (csv_path, xlsx_path, xls_path):
+    templates = App._read_treatment_templates_file(source)
+    assert len(templates) == 1
+    assert templates[0]["disease"] == "Diabetes"
+    assert templates[0]["medications"][0]["brand_name"] == "Glucophage"
+
+for extension in (".csv", ".xlsx", ".xls"):
+    exported = root / f"plans-export{extension}"
+    App._write_treatment_templates_file(exported, headers, [values])
+    templates = App._read_treatment_templates_file(exported)
+    assert templates[0]["medications"][0]["generic_name"] == "Metformin"
+'''
+    run_isolated(tmp_path, code)
+
+
+def test_treatment_template_dashboard_page_uses_current_drug_database():
+    import inspect
+    import i18n as I
+    from main import App, NAV_ICONS
+
+    ui_source = inspect.getsource(App._build_ui)
+    forms_source = inspect.getsource(App.build_forms)
+    page_source = inspect.getsource(App._build_treatment_templates_page)
+    search_source = inspect.getsource(App.refresh_treatment_drug_results)
+    template_search_source = inspect.getsource(App._filter_treatment_template_menu)
+    template_popup_source = inspect.getsource(App._show_treatment_template_suggestions)
+    template_choice_source = inspect.getsource(App._choose_treatment_template)
+    current_disease_source = inspect.getsource(App._current_treatment_disease)
+    render_source = inspect.getsource(App.render_treatment_template_drugs)
+    use_source = inspect.getsource(App.use_treatment_template)
+    preview_source = inspect.getsource(App._show_treatment_apply_preview)
+    apply_source = inspect.getsource(App._apply_treatment_selection)
+    export_source = inspect.getsource(App.export_treatment_templates_review)
+    write_source = inspect.getsource(App._write_treatment_templates_file)
+    import_source = inspect.getsource(App.import_treatment_templates_xlsx)
+    parse_source = inspect.getsource(App._read_treatment_templates_file)
+    assert ui_source.index('_add_page_button("drug_classes"') < ui_source.index(
+        '_add_page_button("treatment_templates"')
+    assert '"treatment_templates": ctk.CTkFrame' in forms_source
+    assert "treatment_disease_var" in page_source
+    assert "treatment_variant_var" not in page_source
+    assert "treatment_disease_entry" not in page_source
+    assert "treatment_local_note" not in page_source
+    assert "CTkComboBox" in page_source
+    assert "_filter_treatment_template_menu" in page_source
+    assert "_show_treatment_template_suggestions(matches)" in template_search_source
+    assert "Toplevel" in template_popup_source
+    assert "_choose_treatment_template" in template_popup_source
+    assert "CTkScrollableFrame" in template_popup_source
+    assert "winfo_reqheight" in template_popup_source
+    assert "matches[:8]" not in template_popup_source
+    assert "load_treatment_template" in template_choice_source
+    assert "treatment_template_selector_var" in current_disease_source
+    assert "duplicate_treatment_template" in page_source
+    assert "backup_treatment_templates" not in page_source
+    assert "restore_treatment_templates" not in page_source
+    assert "export_treatment_templates_review" not in page_source
+    assert "import_treatment_templates_xlsx" not in page_source
+    assert "treatment_drug_search_var" in page_source
+    assert "search_prescribable" in search_source
+    assert "treatment_drug_results.pack_forget()" in search_source
+    assert "treatment_search_hint" not in search_source
+    assert '("brand_name", I.t("generic_trade_name"))' in render_source
+    assert '("generic_name", I.t("scientific_name"))' in render_source
+    assert 'uniform="treatment_names"' in render_source
+    assert '("dosage", I.t("dosage"), None)' in render_source
+    assert '("frequency", I.t("frequency"), FREQUENCY_OPTIONS)' in render_source
+    assert '("duration", I.t("duration"), None)' in render_source
+    assert '("notes", I.t("notes"), NOTE_OPTIONS)' in render_source
+    assert "CTkComboBox" in render_source
+    assert "DirectionalTextBinding" in render_source
+    assert "_show_treatment_apply_preview" in use_source
+    assert "CTkRadioButton" in preview_source
+    assert "treatment_choose_one" in preview_source
+    assert "qu.DrugItem" in apply_source
+    assert "_scroll_medication_row_into_view" in apply_source
+    assert "_write_treatment_templates_file" in export_source
+    assert "Workbook" in write_source and "csv.writer" in write_source
+    assert "xlwt" in write_source
+    assert "load_workbook" in parse_source and "xlrd" in parse_source
+    assert "merge_treatment_templates" in import_source
+    assert NAV_ICONS["treatment_templates"]
+    for language in ("en", "ar"):
+        I.set_lang(language)
+        for key in ("treatment_templates", "treatment_disease",
+                    "treatment_search_database", "treatment_use_rx",
+                    "treatment_duplicate", "treatment_apply_preview",
+                    "treatment_export_database", "treatment_import_database",
+                    "treatment_no_template_match"):
+            assert I.t(key)
+    I.set_lang("en")
 
 
 def test_arabic_documents_and_markup_characters_render(tmp_path):
@@ -333,8 +560,10 @@ def test_notes_picker_has_the_requested_administration_presets():
 
 
 def test_visual_layout_constants_are_compact_and_consistent():
+    import inspect
     from main import (ACTION_HEIGHT, DASHBOARD_WIDTH, FIELD_HEIGHT, LIST_FONT,
-                      PAGE_TITLE_FONT_SIZE, SELECTED_MEDICINE_FONT_SIZE)
+                      PAGE_TITLE_FONT_SIZE, SELECTED_MEDICINE_FONT_SIZE,
+                      App, SettingsWindow)
 
     assert FIELD_HEIGHT == 40
     assert ACTION_HEIGHT == 38
@@ -342,6 +571,8 @@ def test_visual_layout_constants_are_compact_and_consistent():
     assert PAGE_TITLE_FONT_SIZE == 35
     assert SELECTED_MEDICINE_FONT_SIZE == 35
     assert DASHBOARD_WIDTH < 210
+    assert 'pady=(0, 3)' in inspect.getsource(App.page_header)
+    assert 'pady=(4, 6)' in inspect.getsource(SettingsWindow._new_page)
 
 
 def test_medication_cards_use_compact_header_actions_without_duplicate_or_hints():
@@ -408,30 +639,72 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
 
     form_source = inspect.getsource(App.build_forms)
     browser_source = inspect.getsource(App.refresh_class_browser)
+    unclassified_mode_source = inspect.getsource(App._set_class_browser_mode)
+    unclassified_source = inspect.getsource(App.render_unclassified_class_search)
+    unclassified_page_source = inspect.getsource(
+        App._append_unclassified_class_search_page)
+    unclassified_card_source = inspect.getsource(App._add_unclassified_class_card)
     breadcrumb_source = inspect.getsource(App._set_class_breadcrumb)
     group_page_source = inspect.getsource(App.show_subclass_page)
     detail_page_source = inspect.getsource(App.show_detail_medicines_page)
+    all_classes_source = inspect.getsource(App.show_all_detailed_classes)
+    all_classes_render_source = inspect.getsource(App.render_all_detailed_classes)
+    context_source = inspect.getsource(App.show_class_medicine_context_menu)
+    import_source = inspect.getsource(App.show_import_classification_assistant)
     mapping_source = inspect.getsource(App.show_class_mapping_editor)
     save_source = inspect.getsource(App.save_class_mapping)
     integrity_source = inspect.getsource(App.class_mapping_integrity)
     assert "self.class_breadcrumb" in form_source
     assert "self.class_group_list" in form_source
     assert "self.class_detail_list" in form_source
-    assert "self.class_medicine_results" in form_source
+    assert "self.class_medicine_results" not in form_source
+    assert "self.class_summary" not in form_source
+    assert 'fill="both", expand=True' in form_source
     assert "search_classes_medicines" in form_source
-    assert "review_unclassified" in form_source
+    assert "review_unclassified" not in form_source
     assert "mapping_integrity" in form_source
-    assert "class_summary_starred" in browser_source
-    assert "class_summary_recent" in browser_source
-    assert "toggle_class_drug_star" in browser_source
-    assert "add_drug_database_item" in browser_source
+    assert "class_summary_starred" not in browser_source
+    assert "class_summary_recent" not in browser_source
+    assert "no_mapped_medicines" not in browser_source
     assert 'I.t("drug_classes")' not in breadcrumb_source
     assert "show_subclass_page" in breadcrumb_source
     assert "show_detail_medicines_page" in breadcrumb_source
     assert "show_detail_medicines_page" in group_page_source
     assert 'bind(\n                "<Double-Button-1>"' in group_page_source
-    assert "back_to_detailed_classes" in detail_page_source
+    assert 'I.t("back")' in detail_page_source
     assert "_drugs_in_class" in detail_page_source
+    assert "command=self.back_to_major_groups" in detail_page_source
+    assert "class_page_header.pack_forget" in all_classes_source
+    assert "all_detailed_classes_hint" not in all_classes_source
+    assert "all_detailed_drug_classes" not in all_classes_source
+    assert 'grid_columnconfigure((1, 2), weight=1' in all_classes_source
+    assert 'row=index // 2, column=index % 2' in all_classes_render_source
+    assert 'fill="both", expand=True' in all_classes_source
+    assert "schedule_class_group_selection" in form_source
+    assert "schedule_class_detail_selection" in browser_source
+    assert "schedule_subclass_selection" in group_page_source
+    assert "context_use_rx" in context_source
+    assert "context_edit_mapping" in context_source
+    assert "context_view_reference" not in context_source
+    assert '("Segoe UI", 44)' in context_source
+    assert "import_new_medicines" in import_source
+    assert "import_recognized_mappings" in import_source
+    assert "import_changed_missing" in import_source
+    assert "class_group_filter_var" in form_source
+    assert "class_detail_filter_var" in form_source
+    assert "class_name_filter_var" in form_source
+    assert "class_starred_filter_var" not in form_source
+    assert "class_unclassified_filter_var" in form_source
+    assert "class_unclassified_panel" in form_source
+    assert "class_left_panel.pack_forget" in unclassified_mode_source
+    assert "class_right_panel.pack_forget" in unclassified_mode_source
+    assert "class_group_filter_menu.pack_forget" in unclassified_mode_source
+    assert "class_detail_filter_menu.pack_forget" in unclassified_mode_source
+    assert "_unclassified_page_size = 24" in unclassified_source
+    assert "_append_unclassified_class_search_page" in unclassified_source
+    assert "start + self._unclassified_page_size" in unclassified_page_source
+    assert 'I.t("load_more")' in unclassified_page_source
+    assert "row=index // 2, column=index % 2" in unclassified_card_source
     assert "selectmode=tk.EXTENDED" in mapping_source
     assert "mapping_save_and_next" in mapping_source
     assert "update_classifications" in save_source
@@ -443,8 +716,87 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
         for key in ("search_classes_medicines", "review_unclassified",
                     "mapping_integrity", "save_and_next",
                     "class_summary_total", "class_summary_starred",
-                    "back_to_detailed_classes", "class_pediatric_preparations",
-                    "class_iv_fluids_devices"):
+                    "back", "class_pediatric_preparations",
+                    "class_iv_fluids_devices", "classification_confirmed",
+                    "classification_suggested", "filter_all_groups",
+                    "context_edit_mapping", "import_classification_assistant",
+                    "load_more"):
+            assert I.t(key)
+    I.set_lang("en")
+
+
+def test_settings_workspace_has_search_output_defaults_diagnostics_and_safety():
+    import inspect
+    import i18n as I
+    import pdf_generator as pdfgen
+    from config import Config
+    from main import App, SettingsWindow
+
+    init_source = inspect.getsource(SettingsWindow.__init__)
+    workspace_source = inspect.getsource(SettingsWindow._build_workspace)
+    new_page_source = inspect.getsource(SettingsWindow._new_page)
+    card_source = inspect.getsource(SettingsWindow._card)
+    entry_source = inspect.getsource(SettingsWindow._entry)
+    clinic_source = inspect.getsource(SettingsWindow._build_clinic_page)
+    documents_source = inspect.getsource(SettingsWindow._build_documents_page)
+    preview_source = inspect.getsource(SettingsWindow.update_clinic_preview)
+    choose_logo_source = inspect.getsource(SettingsWindow.choose_logo)
+    database_source = inspect.getsource(SettingsWindow._build_database_page)
+    database_button_source = inspect.getsource(SettingsWindow._database_action_button)
+    treatment_validate_source = inspect.getsource(
+        SettingsWindow.validate_treatment_database)
+    gemini_source = inspect.getsource(SettingsWindow._build_gemini_page)
+    security_source = inspect.getsource(SettingsWindow._build_security_page)
+    about_source = inspect.getsource(SettingsWindow._build_about_page)
+    save_source = inspect.getsource(SettingsWindow.save)
+    remove_key_source = inspect.getsource(SettingsWindow.remove_gemini_key)
+    build_source = inspect.getsource(App._build_full)
+    backup_source = inspect.getsource(Config.maybe_create_automatic_backup)
+    assert "settings_search_var" in init_source
+    assert "settings_search_entry" in workspace_source
+    assert "if subtitle" not in new_page_source
+    assert "size=24" in new_page_source
+    assert "size=14" in card_source
+    assert "height=36" in entry_source
+    assert "clinic_preview_card" in clinic_source
+    assert "_clinic_preview_placeholder" in clinic_source
+    assert "document_header_var" in documents_source
+    assert "document_language_var" in documents_source
+    assert "logo_size_var" not in documents_source
+    assert "margin_var" not in documents_source
+    assert "settings_logo_margin_hint" not in documents_source
+    assert "export_folder_var" in documents_source
+    assert "image=None" not in preview_source
+    assert "_clinic_preview_placeholder" in preview_source
+    assert "image.verify" in choose_logo_source
+    assert "validate_database" in database_source
+    assert "settings_treatment_database" in database_source
+    assert "import_treatment_database" in database_source
+    assert "export_treatment_database" in database_source
+    assert "remove_treatment_database" in database_source
+    assert "validate_treatment_database" in database_source
+    assert "height=32" in database_button_source
+    assert "blank_medicines" in treatment_validate_source
+    assert "gemini_privacy_card" in gemini_source
+    assert "auto_backup_var" in security_source
+    assert "security_protection_card" in security_source
+    assert "settings_safe_credit" in about_source
+    assert "copy_diagnostics" not in about_source
+    assert "settings_diagnostics" not in about_source
+    assert "document_defaults" in save_source
+    assert "askyesno" in remove_key_source
+    assert "margin_mm_value" in build_source
+    assert "backups[10:]" in backup_source
+    assert "show_header" in inspect.signature(pdfgen.generate_prescription_pdf).parameters
+    assert "show_header" in inspect.signature(pdfgen.generate_prescription_docx).parameters
+    for language in ("en", "ar"):
+        I.set_lang(language)
+        for key in ("settings_search", "settings_about", "settings_header_preview",
+                    "settings_validate_database", "settings_automatic_backup",
+                    "settings_treatment_database",
+                    "settings_validate_treatment_database",
+                    "settings_safe_credit", "settings_privacy_summary",
+                    "settings_invalid_logo_image"):
             assert I.t(key)
     I.set_lang("en")
 
@@ -1019,3 +1371,44 @@ def test_favorite_page_responsive_layout_and_new_controls_are_available():
     assert "favorite_summary_label" not in refresh_source
     assert "_favorite_card_widgets" in refresh_source
     I.set_lang("en")
+
+
+def test_indexed_lazy_drug_cache_and_performance_controls(tmp_path):
+    code = '''
+import os
+import sqlite3
+from pathlib import Path
+import drug_db
+
+root = Path(os.environ["RX_APP_DATA_DIR"])
+source = root / "large.csv"
+source.write_text(
+    "generic_name,brand_name,therapeutic_group,detailed_class\\n"
+    "Amoxicillin,Amoxil,antiinfectives,Other\\n"
+    "Metformin,Glucophage,endocrine_nutrition,Antidiabetic: Biguanides\\n",
+    encoding="utf-8")
+database = drug_db.DrugDatabase(str(source))
+assert isinstance(database.drugs, drug_db.DrugCollection)
+assert len(database.drugs) == 2
+assert database.drugs[0].generic_name == "Amoxicillin"
+assert database.drugs[:1][0].brand_name == "Amoxil"
+assert database.search_prescribable("gluco")[0].generic_name == "Metformin"
+assert database.contains_name(brand_name="Amoxil")
+assert database.cache_path.exists()
+with sqlite3.connect(database.cache_path) as connection:
+    indexes = {row[1] for row in connection.execute("PRAGMA index_list(drugs)")}
+assert {"idx_drugs_generic", "idx_drugs_brand", "idx_drugs_prescribable"}.issubset(indexes)
+source.write_text("generic_name,brand_name\\nDapagliflozin,Forxiga\\n", encoding="utf-8")
+database.load()
+assert len(database.drugs) == 1
+assert database.search_trade("forx")[0].generic_name == "Dapagliflozin"
+'''
+    run_isolated(tmp_path, code)
+
+    import inspect
+    from main import App, DrugRow
+    assert "ThreadPoolExecutor" in inspect.getsource(App.__init__)
+    assert "_load_page_data" in inspect.getsource(App.show_page)
+    assert "180" in inspect.getsource(DrugRow._schedule_autocomplete)
+    assert "_append_detail_medicine_page" in inspect.getsource(App.show_detail_medicines_page)
+    assert "_favorite_render_limit" in inspect.getsource(App.refresh_favorites_page)

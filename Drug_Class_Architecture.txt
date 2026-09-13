@@ -1,0 +1,321 @@
+DRUG CLASS ARCHITECTURE
+=======================
+
+Purpose
+-------
+This file documents the therapeutic classification used by the application and
+shows a recommended subgroup layer for clearer navigation.
+
+Recommended hierarchy
+---------------------
+Major therapeutic group
+  -> Subgroup
+     -> Detailed drug class
+        -> Mapped medicines
+
+Current implementation note
+---------------------------
+The application currently stores:
+  1. therapeutic_group = major therapeutic group code
+  2. detailed_class    = detailed drug class name
+  3. class_mappings    = multiple mappings in this form:
+                         group_code::detailed_class|group_code::detailed_class
+
+The subgroup headings below are an organizational recommendation. They are not
+currently stored as a separate database field. The existing category field is a
+local/favorite tag and should not be treated as a clinical subgroup.
+
+
+01. GASTROINTESTINAL
+    Code: gastrointestinal
+
+    Subgroup: Acid suppression and mucosal protection
+      - PPI (Proton Pump Inhibitor)
+      - H2-Receptor Antagonist (H2RA)
+      - Antacid & Mucosal Protectant
+
+    Subgroup: Digestion, gas and enzymes
+      - Antiflatulent & Digestive Enzymes
+
+    Subgroup: Functional bowel disorders
+      - Antispasmodic & IBS Agent
+
+    Subgroup: Nausea and gastrointestinal motility
+      - Antiemetic & Prokinetic
+
+    Subgroup: Constipation
+      - Laxative: Osmotic & Bulking
+      - Laxative: Stimulant & Stool Softener
+
+    Subgroup: Diarrhea, microbiome and rehydration
+      - Antidiarrheal & Motility Inhibitor
+      - Probiotic, Prebiotic & ORS
+
+    Subgroup: Inflammatory bowel disease
+      - Intestinal Anti-inflammatory (IBD)
+
+
+02. ENDOCRINE, DIABETES & NUTRITION
+    Code: endocrine_nutrition
+
+    Subgroup: Thyroid disorders
+      - Thyroid Replacement Hormone
+      - Antithyroid Agent (Thionamides)
+
+    Subgroup: Adrenal and systemic corticosteroid therapy
+      - Systemic Glucocorticoids
+
+    Subgroup: Non-insulin antidiabetic therapy
+      - Antidiabetic: Biguanides
+      - Antidiabetic: Sulfonylureas
+      - Antidiabetic: DPP-4 Inhibitors (Gliptins)
+      - Antidiabetic: SGLT2 Inhibitors (Gliflozins)
+      - Antidiabetic: GLP-1 Receptor Agonists
+      - Antidiabetic: Thiazolidinediones (TZD)
+
+    Subgroup: Insulin therapy
+      - Insulin: Rapid & Short-Acting
+      - Insulin: Intermediate & Long-Acting (Basal)
+
+    Subgroup: Nutrition and supplementation
+      - Vitamins & Mineral Supplements
+
+
+03. CARDIOVASCULAR
+    Code: cardiovascular_blood
+
+    Subgroup: Renin-angiotensin system and heart failure therapy
+      - ACE Inhibitor (ACEI)
+      - ARB (Angiotensin Receptor Blocker)
+      - ARNI (Angiotensin Receptor Neprilysin Inhibitor)
+
+    Subgroup: Calcium-channel blockers
+      - CCB: Dihydropyridine (Peripheral Vasodilator)
+      - CCB: Non-Dihydropyridine (Rate-Limiting)
+
+    Subgroup: Beta blockers
+      - Beta-Blocker: Cardioselective (Beta-1)
+      - Beta-Blocker: Non-Selective / Alpha-Beta
+
+    Subgroup: Diuretics
+      - Diuretic: Thiazide & Thiazide-Like
+      - Diuretic: Loop Diuretic
+      - Diuretic: MRA (Potassium-Sparing)
+
+    Subgroup: Lipid-lowering therapy
+      - Lipid-Lowering: HMG-CoA Reductase Inhibitor (Statin)
+      - Lipid-Lowering: Cholesterol Absorption Inhibitor
+      - Lipid-Lowering: Fibrate
+
+    Subgroup: Antianginal and vasodilator therapy
+      - Nitrates & Direct Vasodilators
+
+    Subgroup: Rhythm control and cardiac glycosides
+      - Cardiac Glycosides & Antiarrhythmics
+
+
+04. BLOOD
+    Code: blood
+
+    Subgroup: Antiplatelet and anticoagulant therapy
+      - Antiplatelet Agent (Cyclooxygenase / ADP)
+      - Anticoagulant: DOAC
+      - Anticoagulant: Parenteral (Heparins)
+      - Anticoagulant: Vitamin K Antagonist (VKA)
+
+    Subgroup: Hemostasis
+      - Hemostatic & Antifibrinolytic
+
+    Subgroup: Anemia treatment
+      - Antianemic Agent (Iron & Erythropoietin)
+
+
+05. ANTI-INFECTIVES
+    Code: antiinfectives
+
+    Subgroup: Penicillins
+      - Aminopenicillins & Beta-Lactamase Inhibitors
+      - Antipseudomonal & Penicillinase-Resistant
+
+    Subgroup: Cephalosporins
+      - Cephalosporins: 1st & 2nd Generation
+      - Cephalosporins: 3rd & 4th Generation
+
+    Subgroup: Other beta-lactam antibacterials
+      - Carbapenems & Monobactams
+
+    Subgroup: Non-beta-lactam antibacterials
+      - Macrolides & Ketolides
+      - Fluoroquinolones
+      - Tetracyclines & Glycylcyclines
+      - Aminoglycosides
+      - Glycopeptides & Lipoglycopeptides
+      - Nitroimidazoles & Antiseptics
+
+    Subgroup: Systemic antifungals
+      - Systemic Antifungal: Azoles & Echinocandins
+
+    Subgroup: Antivirals
+      - Antiviral: Anti-Herpetic & Anti-Influenza
+      - Antiviral: Direct-Acting Anti-HCV & Antiretroviral
+
+    Subgroup: Antiparasitic therapy
+      - Anthelmintics & Scabicides
+      - Antimalarial Chemotherapy
+
+
+06. ANALGESIC & MUSCULOSKELETAL
+    Code: pain_musculoskeletal
+
+    Subgroup: Nonsteroidal anti-inflammatory drugs
+      - NSAID: Non-Selective
+      - NSAID: COX-2 Selective Inhibitor (Coxibs)
+
+    Subgroup: Muscle disorders
+      - Muscle Relaxants
+
+    Subgroup: Gout and bone metabolism
+      - Anti-Gout: Acute & Urate-Lowering (ULT)
+      - Bisphosphonates & Bone Metabolism Agents
+
+    Subgroup: Non-opioid analgesia
+      - Analgesic & Antipyretic (Non-Opioid)
+
+    Subgroup: Opioid analgesia
+      - Opioid Analgesic:
+
+
+07. NEUROLOGY & MENTAL HEALTH
+    Code: neuro_mental_health
+
+    Subgroup: Anxiolytics, hypnotics and sedatives
+      - Benzodiazepines & Z-Drugs
+
+    Subgroup: Antipsychotic therapy
+      - Antipsychotic: Second Generation (Atypical)
+
+    Subgroup: Antidepressant therapy
+      - SSRI
+      - SNRI & NaSSA
+      - Tricyclic
+
+    Subgroup: Movement and cognitive disorders
+      - Dopaminergics & Cognitive Enhancers
+
+
+08. RESPIRATORY, ALLERGY & ENT
+    Code: respiratory_allergy_ent
+
+    Subgroup: Nasal and allergy treatment
+      - Nasal Decongestant & Saline Wash
+      - Intranasal Corticosteroids (INCS)
+      - Antihistamines: 2nd Generation (Non-Sedating)
+      - Antihistamines: 1st Gen & Antivertigo
+
+    Subgroup: Reliever bronchodilators
+      - SABA (Short-Acting Beta-2 Agonist)
+
+    Subgroup: Maintenance bronchodilators and controllers
+      - LABA (Long-Acting Beta-2 Agonist)
+      - ICS (Inhaled Corticosteroids)
+      - Anticholinergic Bronchodilators (SAMA & LAMA)
+      - Leukotriene Receptor Antagonists (LTRA)
+
+    Subgroup: Cough and mucus treatment
+      - Cough Suppressants & Antitussives
+      - Mucolytics & Expectorants
+
+
+09. SKIN, EYE & EAR
+    Code: skin_eye_ear
+
+    Subgroup: Dermatology - anti-infective treatment
+      - Topical Antifungal & Antibacterial
+
+    Subgroup: Dermatology - inflammatory and steroid treatment
+      - Topical Corticosteroid (Mild to Superpotent)
+
+    Subgroup: Dermatology - acne and retinoid treatment
+      - Topical Retinoid, Benzoyl Peroxide & Azelaic Acid
+
+    Subgroup: Dermatology - skin protection and repair
+      - Emollient, Barrier Protectant & Cicatrizant
+
+    Subgroup: Ophthalmic anti-infective treatment
+      - Ophthalmic Antibacterial & Antiviral
+
+    Subgroup: Ophthalmic allergy and lubrication
+      - Ophthalmic Anti-Allergic & Artificial Tears
+
+    Subgroup: Glaucoma treatment
+      - Antiglaucoma Preparations (Prostaglandin & Beta-blocker)
+
+    Subgroup: Otic preparations
+      - Otic Analgesic, Antibiotic & Ceruminolytic
+
+
+10. GENITOURINARY & REPRODUCTIVE
+    Code: genitourinary_reproductive
+
+    Subgroup: Benign prostatic hyperplasia
+      - BPH Agent: Alpha-1 Blocker
+      - BPH Agent: 5-Alpha Reductase Inhibitor (5-ARI)
+
+    Subgroup: Sexual medicine
+      - Erectile Dysfunction (PDE-5 Inhibitor)
+
+    Subgroup: Bladder disorders
+      - Urinary Antispasmodic / Overactive Bladder (OAB)
+
+    Subgroup: Contraception
+      - Combined Oral Contraceptive (COC)
+      - Progestin-Only Formulation (POP & Implant/Depot)
+      - Emergency Contraceptive
+
+    Subgroup: Vaginal anti-infective treatment
+      - Vaginal Antifungal & Antimicrobial
+
+
+11. PEDIATRIC PREPARATIONS
+    Code: pediatric_preparations
+
+    Subgroup: General pediatric formulations
+      - Pediatric Preparations
+
+
+12. IV FLUIDS & DEVICES
+    Code: iv_fluids_devices
+
+    Subgroup: Intravenous fluids and administration devices
+      - IV Fluids & Devices
+
+
+DATABASE IMPLEMENTATION OPTION
+==============================
+
+To implement the recommended third level later, add an optional column:
+
+  subgroup
+
+Recommended database columns:
+
+  brand_name
+  generic_name
+  strength
+  form
+  therapeutic_group
+  subgroup
+  detailed_class
+  class_mappings
+  mapping_status
+  notes
+
+Rules:
+  - A major therapeutic group contains one or more subgroups.
+  - A subgroup contains one or more detailed drug classes.
+  - A detailed drug class contains mapped medicines.
+  - One medicine may belong to multiple detailed classes.
+  - Existing two-level mappings must continue to work when subgroup is empty.
+  - Subgroups are for organization and navigation, not prescribing advice.
+
+End of file.

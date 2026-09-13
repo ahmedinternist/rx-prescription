@@ -1,0 +1,238 @@
+DRUG CLASSES PAGE - EXACT TAB AND SUBPAGE NAMES
+================================================
+
+This file uses the exact English names currently displayed by the application.
+
+IMPORTANT TERMINOLOGY
+---------------------
+
+Level 1 page title:        Drug classes
+Level 1 left panel:        Major therapeutic groups
+Level 1 right panel:       Detailed drug classes
+All-classes button/page:   Detailed Drug Classes
+Navigation button:         Back
+
+The current application does NOT have a separate clinical "Subgroup" level.
+Internally, the code calls the detailed classes SUBCLASSES, but the visible UI
+name is "Detailed drug classes".
+
+The exact current navigation structure is:
+
+  Drug classes
+    -> Major therapeutic groups
+       -> [Major therapeutic group name]
+          -> Detailed drug classes
+             -> [Detailed drug class name]
+                -> Medicines mapped to that detailed drug class
+
+Major-group subpage navigation trail:
+
+  Major therapeutic groups  >  [Major therapeutic group name]
+
+Medicine-list subpage navigation trail:
+
+  [Major therapeutic group name]  >  [Detailed drug class name]
+
+Therefore, the medicine-list subpage is the third visible level. It is not
+currently named "Subgroup" in the application.
+
+
+1. MAJOR THERAPEUTIC GROUP: Gastrointestinal
+   Internal code: gastrointestinal
+
+   Detailed drug classes:
+   - PPI (Proton Pump Inhibitor)
+   - H2-Receptor Antagonist (H2RA)
+   - Antacid & Mucosal Protectant
+   - Antiflatulent & Digestive Enzymes
+   - Antispasmodic & IBS Agent
+   - Antiemetic & Prokinetic
+   - Laxative: Osmotic & Bulking
+   - Laxative: Stimulant & Stool Softener
+   - Antidiarrheal & Motility Inhibitor
+   - Probiotic, Prebiotic & ORS
+   - Intestinal Anti-inflammatory (IBD)
+
+
+2. MAJOR THERAPEUTIC GROUP: Endocrine, diabetes & nutrition
+   Internal code: endocrine_nutrition
+
+   Detailed drug classes:
+   - Thyroid Replacement Hormone
+   - Antithyroid Agent (Thionamides)
+   - Systemic Glucocorticoids
+   - Antidiabetic: Biguanides
+   - Antidiabetic: Sulfonylureas
+   - Antidiabetic: DPP-4 Inhibitors (Gliptins)
+   - Antidiabetic: SGLT2 Inhibitors (Gliflozins)
+   - Antidiabetic: GLP-1 Receptor Agonists
+   - Antidiabetic: Thiazolidinediones (TZD)
+   - Insulin: Rapid & Short-Acting
+   - Insulin: Intermediate & Long-Acting (Basal)
+   - Vitamins & Mineral Supplements
+
+
+3. MAJOR THERAPEUTIC GROUP: Cardiovascular
+   Internal code: cardiovascular_blood
+
+   Detailed drug classes:
+   - ACE Inhibitor (ACEI)
+   - ARB (Angiotensin Receptor Blocker)
+   - ARNI (Angiotensin Receptor Neprilysin Inhibitor)
+   - CCB: Dihydropyridine (Peripheral Vasodilator)
+   - CCB: Non-Dihydropyridine (Rate-Limiting)
+   - Beta-Blocker: Cardioselective (Beta-1)
+   - Beta-Blocker: Non-Selective / Alpha-Beta
+   - Diuretic: Thiazide & Thiazide-Like
+   - Diuretic: Loop Diuretic
+   - Diuretic: MRA (Potassium-Sparing)
+   - Lipid-Lowering: HMG-CoA Reductase Inhibitor (Statin)
+   - Lipid-Lowering: Cholesterol Absorption Inhibitor
+   - Lipid-Lowering: Fibrate
+   - Nitrates & Direct Vasodilators
+   - Cardiac Glycosides & Antiarrhythmics
+
+
+4. MAJOR THERAPEUTIC GROUP: Blood
+   Internal code: blood
+
+   Detailed drug classes:
+   - Antiplatelet Agent (Cyclooxygenase / ADP)
+   - Anticoagulant: DOAC
+   - Anticoagulant: Parenteral (Heparins)
+   - Anticoagulant: Vitamin K Antagonist (VKA)
+   - Hemostatic & Antifibrinolytic
+   - Antianemic Agent (Iron & Erythropoietin)
+
+
+5. MAJOR THERAPEUTIC GROUP: Anti-infectives
+   Internal code: antiinfectives
+
+   Detailed drug classes:
+   - Aminopenicillins & Beta-Lactamase Inhibitors
+   - Antipseudomonal & Penicillinase-Resistant
+   - Cephalosporins: 1st & 2nd Generation
+   - Cephalosporins: 3rd & 4th Generation
+   - Carbapenems & Monobactams
+   - Macrolides & Ketolides
+   - Fluoroquinolones
+   - Tetracyclines & Glycylcyclines
+   - Aminoglycosides
+   - Glycopeptides & Lipoglycopeptides
+   - Nitroimidazoles & Antiseptics
+   - Systemic Antifungal: Azoles & Echinocandins
+   - Antiviral: Anti-Herpetic & Anti-Influenza
+   - Antiviral: Direct-Acting Anti-HCV & Antiretroviral
+   - Anthelmintics & Scabicides
+   - Antimalarial Chemotherapy
+
+
+6. MAJOR THERAPEUTIC GROUP: Analgesic & musculoskeletal
+   Internal code: pain_musculoskeletal
+
+   Detailed drug classes:
+   - NSAID: Non-Selective
+   - NSAID: COX-2 Selective Inhibitor (Coxibs)
+   - Muscle Relaxants
+   - Anti-Gout: Acute & Urate-Lowering (ULT)
+   - Bisphosphonates & Bone Metabolism Agents
+   - Analgesic & Antipyretic (Non-Opioid)
+   - Opioid Analgesic:
+
+
+7. MAJOR THERAPEUTIC GROUP: Neurology & mental health
+   Internal code: neuro_mental_health
+
+   Detailed drug classes:
+   - Benzodiazepines & Z-Drugs
+   - Antipsychotic: Second Generation (Atypical)
+   - SSRI
+   - SNRI & NaSSA
+   - Tricyclic
+   - Dopaminergics & Cognitive Enhancers
+
+
+8. MAJOR THERAPEUTIC GROUP: Respiratory, allergy & ENT
+   Internal code: respiratory_allergy_ent
+
+   Detailed drug classes:
+   - Nasal Decongestant & Saline Wash
+   - Intranasal Corticosteroids (INCS)
+   - Antihistamines: 2nd Generation (Non-Sedating)
+   - Antihistamines: 1st Gen & Antivertigo
+   - SABA (Short-Acting Beta-2 Agonist)
+   - LABA (Long-Acting Beta-2 Agonist)
+   - ICS (Inhaled Corticosteroids)
+   - Anticholinergic Bronchodilators (SAMA & LAMA)
+   - Leukotriene Receptor Antagonists (LTRA)
+   - Cough Suppressants & Antitussives
+   - Mucolytics & Expectorants
+
+
+9. MAJOR THERAPEUTIC GROUP: Skin, eye & ear
+   Internal code: skin_eye_ear
+
+   Detailed drug classes:
+   - Topical Antifungal & Antibacterial
+   - Topical Corticosteroid (Mild to Superpotent)
+   - Topical Retinoid, Benzoyl Peroxide & Azelaic Acid
+   - Emollient, Barrier Protectant & Cicatrizant
+   - Ophthalmic Antibacterial & Antiviral
+   - Ophthalmic Anti-Allergic & Artificial Tears
+   - Antiglaucoma Preparations (Prostaglandin & Beta-blocker)
+   - Otic Analgesic, Antibiotic & Ceruminolytic
+
+
+10. MAJOR THERAPEUTIC GROUP: Genitourinary & reproductive
+    Internal code: genitourinary_reproductive
+
+    Detailed drug classes:
+    - BPH Agent: Alpha-1 Blocker
+    - BPH Agent: 5-Alpha Reductase Inhibitor (5-ARI)
+    - Erectile Dysfunction (PDE-5 Inhibitor)
+    - Urinary Antispasmodic / Overactive Bladder (OAB)
+    - Combined Oral Contraceptive (COC)
+    - Progestin-Only Formulation (POP & Implant/Depot)
+    - Emergency Contraceptive
+    - Vaginal Antifungal & Antimicrobial
+
+
+11. MAJOR THERAPEUTIC GROUP: Pediatric preparations
+    Internal code: pediatric_preparations
+
+    Detailed drug classes:
+    - Pediatric Preparations
+
+
+12. MAJOR THERAPEUTIC GROUP: IV fluids & devices
+    Internal code: iv_fluids_devices
+
+    Detailed drug classes:
+    - IV Fluids & Devices
+
+
+EXACT EXAMPLE OF THE PAGE FLOW
+==============================
+
+Example 1:
+  Drug classes
+  > Major therapeutic groups
+  > Gastrointestinal
+  > PPI (Proton Pump Inhibitor)
+  > Medicines mapped to PPI (Proton Pump Inhibitor)
+
+Example 2:
+  Drug classes
+  > Major therapeutic groups
+  > Cardiovascular
+  > ARB (Angiotensin Receptor Blocker)
+  > Medicines mapped to ARB (Angiotensin Receptor Blocker)
+
+Example 3:
+  Drug classes
+  > Major therapeutic groups
+  > Anti-infectives
+  > Macrolides & Ketolides
+  > Medicines mapped to Macrolides & Ketolides
+
+End of exact-name file.

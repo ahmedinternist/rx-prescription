@@ -139,13 +139,15 @@ def _styles(scale: float):
     return locals()
 
 
-def _generate_modern_prescription_pdf(rx: Prescription, output_path: str, paper_size: str,
-                                      qr_pil_image=None) -> str:
+def _generate_modern_prescription_pdf(
+        rx: Prescription, output_path: str, paper_size: str, qr_pil_image=None,
+        show_header: bool = True, logo_size: str = "medium",
+        margin_mm_value: int = 16) -> str:
     """Clean Arabic-first layout used by Preview and Print."""
     if paper_size not in PAGE_MAP:
         paper_size = "A4"
     scale = SCALE.get(paper_size, 1.0)
-    margin = 16 * mm * scale
+    margin = max(8, min(30, int(margin_mm_value))) * mm * scale
     doc = BaseDocTemplate(str(output_path), pagesize=PAGE_MAP[paper_size], leftMargin=margin,
                           rightMargin=margin, topMargin=margin, bottomMargin=margin)
     doc.addPageTemplates([PageTemplate(id="main", frames=[Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")])])
@@ -158,20 +160,27 @@ def _generate_modern_prescription_pdf(rx: Prescription, output_path: str, paper_
     medicine = ParagraphStyle("ModernMedicine", parent=base, fontName=_FONT_BOLD, fontSize=15 * scale, leading=20 * scale)
     small = ParagraphStyle("ModernSmall", parent=base, fontSize=8.5 * scale, leading=12 * scale, textColor=muted)
     story = []
-    mark = Paragraph("<font size=28 color='#007f79'><b>Rx</b></font>", ParagraphStyle("RxMark", parent=base, alignment=TA_LEFT))
-    if rx.clinic.logo_path and Path(rx.clinic.logo_path).is_file():
-        from reportlab.platypus import Image as RLImage
-        mark = RLImage(rx.clinic.logo_path, width=22 * mm * scale, height=15 * mm * scale)
-    header_lines = [Paragraph(safe(rx.clinic.name or "Prescription"), clinic)]
-    if rx.doctor.specialty:
-        header_lines.append(Paragraph(safe(rx.doctor.specialty), ParagraphStyle("Specialty", parent=base, fontSize=12 * scale, textColor=muted)))
-    if rx.clinic.address or rx.clinic.phone:
-        header_lines.append(Paragraph(safe("  |  ".join(x for x in [rx.clinic.address, rx.clinic.phone] if x)), small))
-    header = Table([[mark, header_lines]], colWidths=[doc.width * .23, doc.width * .77])
-    header.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("ALIGN", (1,0), (1,0), "RIGHT"), ("BOTTOMPADDING", (0,0), (-1,-1), 7 * scale)]))
-    story += [header, Table([[""]], colWidths=[doc.width], style=TableStyle([("LINEABOVE", (0,0), (-1,-1), 1.1, line)])), Spacer(1, 8 * mm * scale)]
+    if show_header:
+        logo_factor = {"small": .75, "medium": 1.0, "large": 1.3}.get(
+            str(logo_size).casefold(), 1.0)
+        mark = Paragraph("<font size=28 color='#007f79'><b>Rx</b></font>", ParagraphStyle("RxMark", parent=base, alignment=TA_LEFT))
+        if rx.clinic.logo_path and Path(rx.clinic.logo_path).is_file():
+            from reportlab.platypus import Image as RLImage
+            mark = RLImage(
+                rx.clinic.logo_path, width=22 * logo_factor * mm * scale,
+                height=15 * logo_factor * mm * scale)
+        header_lines = [Paragraph(safe(rx.clinic.name or "Prescription"), clinic)]
+        if rx.doctor.specialty:
+            header_lines.append(Paragraph(safe(rx.doctor.specialty), ParagraphStyle("Specialty", parent=base, fontSize=12 * scale, textColor=muted)))
+        if rx.clinic.address or rx.clinic.phone:
+            header_lines.append(Paragraph(safe("  |  ".join(x for x in [rx.clinic.address, rx.clinic.phone] if x)), small))
+        header = Table([[mark, header_lines]], colWidths=[doc.width * .23, doc.width * .77])
+        header.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("ALIGN", (1,0), (1,0), "RIGHT"), ("BOTTOMPADDING", (0,0), (-1,-1), 7 * scale)]))
+        story += [header, Table([[""]], colWidths=[doc.width], style=TableStyle([("LINEABOVE", (0,0), (-1,-1), 1.1, line)])), Spacer(1, 8 * mm * scale)]
     date = Paragraph(f"{_t('pdf_date')} {safe(rx.date)}", small)
     doc_lines = [Paragraph(safe(rx.doctor.name), doctor)]
+    if not show_header and rx.doctor.specialty:
+        doc_lines.append(Paragraph(safe(rx.doctor.specialty), small))
     if rx.doctor.license_no:
         doc_lines.append(Paragraph(f"{_t('license')}: {safe(rx.doctor.license_no)}", small))
     info = Table([[date, doc_lines]], colWidths=[doc.width*.38, doc.width*.62])
@@ -302,8 +311,13 @@ def generate_prescription_pdf(
     output_path: str,
     paper_size: str = "A4",
     qr_pil_image=None,
+    show_header: bool = True,
+    logo_size: str = "medium",
+    margin_mm_value: int = 16,
 ) -> str:
-    return _generate_modern_prescription_pdf(rx, output_path, paper_size, qr_pil_image)
+    return _generate_modern_prescription_pdf(
+        rx, output_path, paper_size, qr_pil_image, show_header,
+        logo_size, margin_mm_value)
     if paper_size not in PAGE_MAP:
         paper_size = "A4"
     page = PAGE_MAP[paper_size]
@@ -505,8 +519,10 @@ def generate_medication_label_docx(rx: Prescription, output_path: str,
 # ---------------------------------------------------------------------------
 # Editable Word (.docx) export
 # ---------------------------------------------------------------------------
-def generate_prescription_docx(rx: Prescription, output_path: str,
-                              qr_pil_image=None) -> str:
+def generate_prescription_docx(
+        rx: Prescription, output_path: str, qr_pil_image=None,
+        show_header: bool = True, logo_size: str = "medium",
+        margin_mm_value: int = 16) -> str:
     """Write a fully editable Word document with the same content + QR image."""
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
@@ -516,16 +532,24 @@ def generate_prescription_docx(rx: Prescription, output_path: str,
     muted = RGBColor(0x5b, 0x6b, 0x85)
 
     doc = Document()
+    margin_inches = max(8, min(30, int(margin_mm_value))) / 25.4
+    for section in doc.sections:
+        section.top_margin = Inches(margin_inches)
+        section.bottom_margin = Inches(margin_inches)
+        section.left_margin = Inches(margin_inches)
+        section.right_margin = Inches(margin_inches)
     style = doc.styles["Normal"]
     style.font.name = "Calibri"
     style.font.size = Pt(10)
 
     # Clinic identity and title
-    if rx.clinic.logo_path and Path(rx.clinic.logo_path).is_file():
+    logo_width = {"small": .7, "medium": .9, "large": 1.15}.get(
+        str(logo_size).casefold(), .9)
+    if show_header and rx.clinic.logo_path and Path(rx.clinic.logo_path).is_file():
         logo = doc.add_paragraph()
         logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        logo.add_run().add_picture(rx.clinic.logo_path, width=Inches(0.9))
-    if rx.clinic.name:
+        logo.add_run().add_picture(rx.clinic.logo_path, width=Inches(logo_width))
+    if show_header and rx.clinic.name:
         clinic_title = doc.add_paragraph()
         clinic_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         clinic_title.add_run(rx.clinic.name).bold = True
@@ -533,17 +557,18 @@ def generate_prescription_docx(rx: Prescription, output_path: str,
         if any(clinic_bits):
             clinic_line = doc.add_paragraph("  |  ".join(x for x in clinic_bits if x))
             clinic_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    t = doc.add_paragraph()
-    t.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = t.add_run(I.t("pdf_title"))
-    run.bold = True
-    run.font.size = Pt(20)
-    run.font.color.rgb = navy
-    sub = doc.add_paragraph()
-    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = sub.add_run(I.t("pdf_subtitle"))
-    r.font.color.rgb = muted
-    r.font.size = Pt(11)
+    if show_header:
+        t = doc.add_paragraph()
+        t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = t.add_run(I.t("pdf_title"))
+        run.bold = True
+        run.font.size = Pt(20)
+        run.font.color.rgb = navy
+        sub = doc.add_paragraph()
+        sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = sub.add_run(I.t("pdf_subtitle"))
+        r.font.color.rgb = muted
+        r.font.size = Pt(11)
 
     def labelled(label, value):
         p = doc.add_paragraph()
