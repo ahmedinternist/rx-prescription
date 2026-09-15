@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+import unicodedata
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,67 @@ GROUPS = (
 GROUP_ALIASES = {
     "pediatric_fluids": "pediatric_preparations",
 }
+
+# English labels used by the class browser. Import files commonly contain a
+# visible label rather than the internal code, so keep one canonical resolver
+# here instead of letting arbitrary group text enter the database.
+GROUP_LABELS = {
+    "gastrointestinal": "Gastrointestinal",
+    "endocrine_nutrition": "Endocrine, diabetes & nutrition",
+    "cardiovascular_blood": "Cardiovascular",
+    "blood": "Blood",
+    "antiinfectives": "Anti-infectives",
+    "pain_musculoskeletal": "Analgesic & musculoskeletal",
+    "neuro_mental_health": "Neurology & mental health",
+    "respiratory_allergy_ent": "Respiratory, allergy & ENT",
+    "skin_eye_ear": "Skin, eye & ear",
+    "genitourinary_reproductive": "Genitourinary & reproductive",
+    "pediatric_preparations": "Pediatric preparations",
+    "iv_fluids_devices": "IV fluids & devices",
+}
+
+
+def _classification_key(value: str) -> str:
+    """Return a punctuation-insensitive key for imported classification text."""
+    value = unicodedata.normalize("NFKD", str(value or "")).casefold()
+    value = value.replace("&", " and ")
+    return " ".join("".join(
+        character if character.isalnum() else " " for character in value
+    ).split())
+
+
+_GROUP_IMPORT_ALIASES = {
+    "anti infective": "antiinfectives",
+    "anti infectives": "antiinfectives",
+    "ant infective": "antiinfectives",
+    "analgesia and musculoskeletal": "pain_musculoskeletal",
+    "analgesic and musculoskeletal": "pain_musculoskeletal",
+    "pain and musculoskeletal": "pain_musculoskeletal",
+    "neurology": "neuro_mental_health",
+    "respiratory and allergy": "respiratory_allergy_ent",
+    "skin": "skin_eye_ear",
+    "genitourinary": "genitourinary_reproductive",
+    "pediatric": "pediatric_preparations",
+    "iv fluid": "iv_fluids_devices",
+    "iv fluids": "iv_fluids_devices",
+}
+
+
+def resolve_group_code(value: str) -> str:
+    """Resolve an imported code or visible English label to a valid group code."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    raw = GROUP_ALIASES.get(raw, raw)
+    if raw in GROUPS:
+        return raw
+    key = _classification_key(raw)
+    candidates = {_classification_key(code): code for code in GROUPS}
+    candidates.update({
+        _classification_key(label): code for code, label in GROUP_LABELS.items()
+    })
+    candidates.update(_GROUP_IMPORT_ALIASES)
+    return candidates.get(key, "")
 
 SUBCLASSES = {
     "gastrointestinal": (
@@ -191,6 +253,26 @@ SUBCLASSES = {
     ),
 }
 
+
+def resolve_detailed_class(group_code: str, value: str) -> str:
+    """Return the exact configured class name for imported class text."""
+    group_code = resolve_group_code(group_code)
+    key = _classification_key(value)
+    if not group_code or not key:
+        return ""
+    return next((detail for detail in SUBCLASSES.get(group_code, ())
+                 if _classification_key(detail) == key), "")
+
+
+def group_for_detailed_class(value: str) -> tuple[str, str]:
+    """Resolve a detailed class when it uniquely identifies its major group."""
+    key = _classification_key(value)
+    if not key:
+        return "", ""
+    matches = [(group, detail) for group, details in SUBCLASSES.items()
+               for detail in details if _classification_key(detail) == key]
+    return matches[0] if len(matches) == 1 else ("", "")
+
 # Every class picker and class-browser page uses the same predictable A-Z order.
 SUBCLASSES = {
     code: tuple(sorted(dict.fromkeys(details), key=str.casefold))
@@ -256,18 +338,29 @@ _CATEGORY_HINTS = {
 def classify(name: str, category: str = "", therapeutic_group: str = "",
              detailed_class: str = "") -> Optional[DrugClass]:
     """Return a group/class for a medicine, or None when it is not mapped."""
-    explicit_group = therapeutic_group.strip()
-    if explicit_group == "pediatric_fluids":
+    supplied_group = therapeutic_group.strip()
+    legacy_detail = ""
+    if supplied_group == "pediatric_fluids":
         combined_text = " ".join((name, category, detailed_class)).casefold()
         explicit_group = (
             "iv_fluids_devices"
             if any(token in combined_text for token in ("iv ", "fluid", "device", "cannula"))
             else "pediatric_preparations"
         )
+        legacy_detail = SUBCLASSES[explicit_group][0]
     else:
-        explicit_group = GROUP_ALIASES.get(explicit_group, explicit_group)
-    if explicit_group:
-        return DrugClass(explicit_group, detailed_class.strip() or category.strip() or "Class not specified")
+        explicit_group = resolve_group_code(supplied_group)
+    if supplied_group:
+        if not explicit_group:
+            return None
+        explicit_detail = (
+            resolve_detailed_class(explicit_group, detailed_class)
+            or resolve_detailed_class(explicit_group, category)
+            or legacy_detail
+        )
+        if not explicit_detail:
+            return None
+        return DrugClass(explicit_group, explicit_detail)
     mapped = _NAMES.get(name.casefold().strip())
     if mapped:
         return DrugClass(*mapped, confidence="suggested")
@@ -277,6 +370,8 @@ def classify(name: str, category: str = "", therapeutic_group: str = "",
 
 def groups_for(drug) -> tuple[DrugClass, ...]:
     """Return every explicit mapping, or one built-in suggestion when unmapped."""
+    if str(getattr(drug, "mapping_status", "") or "").casefold() == "unrecognized":
+        return ()
     pairs: list[tuple[str, str]] = []
     for item in str(getattr(drug, "class_mappings", "") or "").split("|"):
         group, separator, detail = item.partition("::")

@@ -1,8 +1,7 @@
-"""Encrypted, local-only patient history.
+"""Encrypted, local-only patient records and explicitly saved prescriptions.
 
-The history intentionally stores only patient demographics. Prescription content
-is not retained automatically, which limits the amount of sensitive data kept
-on the device. Data is protected with Windows DPAPI for the current account.
+Prescription snapshots are retained only when the clinician chooses to save
+them for a patient. Data is protected with Windows DPAPI for the current account.
 """
 from __future__ import annotations
 
@@ -67,12 +66,13 @@ class PatientHistory:
         return sorted(records, key=lambda record: record.get("updated_at", ""), reverse=True)
 
     def find_similar(self, name: str, age: str = "", threshold: float = 0.82,
-                     exclude_id: str = "") -> list[dict[str, Any]]:
-        """Return likely duplicates using normalized Arabic/Latin name matching."""
+                     exclude_id: str = "", sex: str = "") -> list[dict[str, Any]]:
+        """Return likely duplicates using normalized name, age, and sex matching."""
         key = self._key(name)
         if not key:
             return []
         age = str(age or "").strip()
+        sex = str(sex or "").strip().casefold()
         matches = []
         for record in self._load():
             if exclude_id and record.get("id") == exclude_id:
@@ -80,7 +80,9 @@ class PatientHistory:
             record_key = self._key(str(record.get("name", "")))
             score = SequenceMatcher(None, key, record_key).ratio()
             same_age = not age or not record.get("age") or str(record.get("age", "")).strip() == age
-            if score >= threshold and same_age:
+            record_sex = str(record.get("sex", "")).strip().casefold()
+            same_sex = not sex or not record_sex or record_sex == sex
+            if score >= threshold and same_age and same_sex:
                 item = record.copy()
                 item["similarity"] = score
                 matches.append(item)

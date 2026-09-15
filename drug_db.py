@@ -1,13 +1,14 @@
 """Drug database imported from CSV/Excel and queried through SQLite.
 
 The doctor can import/replace the database from any CSV or Excel source (e.g.
-exported from another system, a national formulary). The only REQUIRED column
-is the drug's name; everything else is optional and used to enrich the
+exported from another system, a national formulary). Each row needs at least
+one medicine name; everything else is optional and used to enrich the
 autocomplete + prescription.
 
-Expected columns (case-insensitive, order-independent):
-    generic_name   - scientific / generic name (REQUIRED)
-    brand_name     - trade / brand name (optional)
+Expected columns (case-insensitive, order-independent).  At least one name is
+required per row:
+    generic_name   - scientific / generic name (optional when brand exists)
+    brand_name     - trade / brand name (optional when scientific exists)
     strength       - e.g. "500 mg" (optional)
     form           - e.g. "tablet", "syrup", "capsule" (optional)
     category       - existing local category/favorite tag (optional)
@@ -30,7 +31,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence, Union
 
-REQUIRED_COLUMNS = {"generic_name"}
 COLUMN_ALIASES = {
     "generic_name": ["generic_name", "generic", "generic name", "scientific_name",
                      "scientific name", "scientific", "inn", "name", "drug_name", "drug name",
@@ -104,38 +104,80 @@ def _resolve_columns(header: List[str]) -> Dict[str, str]:
     """Map our canonical field names to the actual column names."""
     lower = {_header_key(h): h for h in header if str(h).strip()}
     mapping: Dict[str, str] = {}
+    # Pharmacy workbooks sometimes contain both "Generic Name" (used as the
+    # product/trade field) and "Scientific Name" (the INN). Prefer the explicit
+    # scientific column whenever both are present.
+    scientific_keys = (
+        "scientific name", "scientific", "inn", "الاسم العلمي",
+    )
+    scientific_column = next(
+        (lower[key] for key in scientific_keys if key in lower), None)
+    if scientific_column:
+        mapping["generic_name"] = scientific_column
     for field_name, aliases in COLUMN_ALIASES.items():
+        if field_name in mapping:
+            continue
         for alias in aliases:
             if _header_key(alias) in lower:
                 mapping[field_name] = lower[_header_key(alias)]
                 break
+    if scientific_column and "brand_name" not in mapping:
+        product_keys = (
+            "generic / trade name", "generic/trade name",
+            "generic or trade name", "generic trade name",
+            "generic name", "generic",
+        )
+        product_column = next(
+            (lower[key] for key in product_keys
+             if key in lower and lower[key] != scientific_column), None)
+        if product_column:
+            mapping["brand_name"] = product_column
     return mapping
 
 
 # ---------------------------------------------------------------------------
 # File reading helpers (module level) — support CSV and Excel.
 # ---------------------------------------------------------------------------
-def _read_rows(path: Path) -> List[Dict[str, str]]:
-    """Read any supported file (CSV / XLSX) into canonical-field dicts."""
+def _new_import_stats() -> Dict[str, int]:
+    return {
+        "source_rows": 0,
+        "imported_rows": 0,
+        "brand_only_rows": 0,
+        "scientific_only_rows": 0,
+        "skipped_blank_names": 0,
+    }
+
+
+def _read_rows_with_stats(path: Path) -> tuple[List[Dict[str, str]], Dict[str, int]]:
+    """Read a supported database and retain row-level import diagnostics."""
+    stats = _new_import_stats()
     suffix = path.suffix.lower()
     if suffix == ".xlsx":
-        return _read_xlsx(path)
-    if suffix == ".xls":
-        return _read_xls(path)
-    return _read_csv(path)
+        rows = _read_xlsx(path, stats)
+    elif suffix == ".xls":
+        rows = _read_xls(path, stats)
+    else:
+        rows = _read_csv(path, stats)
+    stats["imported_rows"] = len(rows)
+    return rows, stats
 
 
-def _read_csv(path: Path) -> List[Dict[str, str]]:
+def _read_rows(path: Path) -> List[Dict[str, str]]:
+    """Read any supported file (CSV / XLSX) into canonical-field dicts."""
+    return _read_rows_with_stats(path)[0]
+
+
+def _read_csv(path: Path, stats: Optional[Dict[str, int]] = None) -> List[Dict[str, str]]:
     with open(path, "r", encoding="utf-8-sig", newline="") as fh:
         reader = csv.reader(fh)
         rows = list(reader)
     if not rows:
         return []
     header = rows[0]
-    return _rows_to_dicts(header, rows[1:])
+    return _rows_to_dicts(header, rows[1:], stats)
 
 
-def _read_xlsx(path: Path) -> List[Dict[str, str]]:
+def _read_xlsx(path: Path, stats: Optional[Dict[str, int]] = None) -> List[Dict[str, str]]:
     from openpyxl import load_workbook
     wb = load_workbook(path, read_only=True, data_only=True)
     grids: List[List[List[str]]] = []
@@ -149,20 +191,21 @@ def _read_xlsx(path: Path) -> List[Dict[str, str]]:
             grids.append(grid)
     finally:
         wb.close()
-    return _read_grids(grids)
+    return _read_grids(grids, stats)
 
 
-def _read_xls(path: Path) -> List[Dict[str, str]]:
+def _read_xls(path: Path, stats: Optional[Dict[str, int]] = None) -> List[Dict[str, str]]:
     """Read legacy Excel workbooks using xlrd (which supports .xls BIFF files)."""
     workbook = xlrd.open_workbook(path)
     grids = []
     for sheet in workbook.sheets():
         grids.append([["" if value is None else str(value) for value in sheet.row_values(index)]
                       for index in range(sheet.nrows)])
-    return _read_grids(grids)
+    return _read_grids(grids, stats)
 
 
-def _read_grids(grids: List[List[List[str]]]) -> List[Dict[str, str]]:
+def _read_grids(grids: List[List[List[str]]],
+                stats: Optional[Dict[str, int]] = None) -> List[Dict[str, str]]:
     """Find a medicine header row across spreadsheet sheets and title rows."""
     fallback_grid: List[List[str]] = []
     for grid in grids:
@@ -173,15 +216,16 @@ def _read_grids(grids: List[List[List[str]]]) -> List[Dict[str, str]]:
             fallback_grid = grid
         for header_index, header in enumerate(grid):
             if "generic_name" in _resolve_columns(header):
-                return _rows_to_dicts(header, grid[header_index + 1:])
+                return _rows_to_dicts(header, grid[header_index + 1:], stats)
     # Preserve support for a simple one-column sheet whose first column is the
     # medicine name, even when it does not use a recognised header label.
     if not fallback_grid:
         return []
-    return _rows_to_dicts(fallback_grid[0], fallback_grid[1:])
+    return _rows_to_dicts(fallback_grid[0], fallback_grid[1:], stats)
 
 
-def _rows_to_dicts(header: List[str], rows: List[List[str]]) -> List[Dict[str, str]]:
+def _rows_to_dicts(header: List[str], rows: List[List[str]],
+                   stats: Optional[Dict[str, int]] = None) -> List[Dict[str, str]]:
     mapping = _resolve_columns(header)
     if "generic_name" not in mapping:
         mapping["generic_name"] = header[0]
@@ -189,10 +233,21 @@ def _rows_to_dicts(header: List[str], rows: List[List[str]]) -> List[Dict[str, s
     for row in rows:
         if not row or not any(c.strip() for c in row):
             continue
+        if stats is not None:
+            stats["source_rows"] += 1
         rec = {k: (row[header.index(v)].strip() if v in header and header.index(v) < len(row) else "")
                for k, v in mapping.items()}
-        if rec.get("generic_name", "").strip():
+        scientific = rec.get("generic_name", "").strip()
+        brand = rec.get("brand_name", "").strip()
+        if scientific or brand:
+            if stats is not None:
+                if brand and not scientific:
+                    stats["brand_only_rows"] += 1
+                elif scientific and not brand:
+                    stats["scientific_only_rows"] += 1
             out.append(rec)
+        elif stats is not None:
+            stats["skipped_blank_names"] += 1
     return out
 
 
@@ -228,6 +283,7 @@ class DrugDatabase:
         self.cache_path = self.path.with_suffix(self.path.suffix + ".sqlite3")
         self.drugs: Sequence[Drug] = DrugCollection(self)
         self.columns: List[str] = []
+        self.last_import_report: Dict[str, int] = _new_import_stats()
         self.load()
 
     @contextmanager
@@ -338,7 +394,8 @@ class DrugDatabase:
         if not self._cache_is_current():
             rows = _read_rows(self.path)
             loaded = [self._dict_to_drug(rec) for rec in rows
-                      if rec.get("generic_name", "").strip()]
+                      if (rec.get("generic_name", "").strip()
+                          or rec.get("brand_name", "").strip())]
             self._rebuild_cache(loaded)
         self.drugs = DrugCollection(self)
         return self.count()
@@ -376,34 +433,52 @@ class DrugDatabase:
         """Import a CSV or Excel (XLS/XLSX) file into the active database.
 
         replace=True overwrites the current DB; replace=False merges
-        (skipping exact duplicate generic names).
+        (skipping exact duplicate product identities).
         """
         src = Path(source_path)
         if not src.exists():
             raise FileNotFoundError(f"Source file not found: {source_path}")
 
-        rows = _read_rows(src)  # list of dict[str,str] keyed by canonical field
+        rows, import_stats = _read_rows_with_stats(src)
         if not rows:
             raise ValueError("No medicine rows were found in the selected file.")
 
         if replace:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             imported = [self._dict_to_drug(r) for r in rows]
+            import_stats.update({
+                "confirmed_rows": sum(
+                    drug.mapping_status == "confirmed" for drug in imported),
+                "suggested_rows": sum(
+                    drug.mapping_status == "suggested" for drug in imported),
+                "unrecognized_class_rows": sum(
+                    drug.mapping_status == "unrecognized" for drug in imported),
+                "unclassified_rows": sum(
+                    not drug.therapeutic_group or not drug.detailed_class
+                    or drug.mapping_status == "unrecognized"
+                    for drug in imported),
+            })
+            self.last_import_report = import_stats
             self._write(imported)
             # Re-read the active local CSV so the autocomplete and class pages
             # immediately use exactly what was saved.
             return self.load()
 
-        # merge mode
+        # Merge by the complete product identity.  This preserves separate
+        # trade products and does not collapse every brand-only row into the
+        # same empty-scientific-name key.
         existing = list(self.drugs)
-        existing_names = {_norm(d.generic_name) for d in existing}
+        existing_identities = {self.drug_identity(d) for d in existing}
         added = 0
         for r in rows:
             d = self._dict_to_drug(r)
-            if _norm(d.generic_name) not in existing_names:
+            identity = self.drug_identity(d)
+            if identity not in existing_identities:
                 existing.append(d)
-                existing_names.add(_norm(d.generic_name))
+                existing_identities.add(identity)
                 added += 1
+        import_stats["added_rows"] = added
+        self.last_import_report = import_stats
         self._write(existing)
         self.load()
         return added
@@ -413,9 +488,54 @@ class DrugDatabase:
         self._write([])
         self.load()
 
+    def add_confirmed_medicine(self, name: str, therapeutic_group: str,
+                               detailed_class: str) -> tuple[Drug, bool]:
+        """Add a named medicine, or confirm/map an existing exact name."""
+        import drug_classes as classes
+
+        medicine_name = str(name).strip()
+        group = classes.resolve_group_code(therapeutic_group)
+        detail = classes.resolve_detailed_class(group, detailed_class)
+        if not medicine_name:
+            raise ValueError("Enter a medicine name.")
+        if not group or not detail:
+            raise ValueError("Choose a valid major group and detailed drug class.")
+
+        drugs = list(self.drugs)
+        existing = next(
+            (drug for drug in drugs if _norm(drug.generic_name) == _norm(medicine_name)
+             or _norm(drug.brand_name) == _norm(medicine_name)), None)
+        created = existing is None
+        medicine = existing or Drug(generic_name=medicine_name)
+        if created:
+            drugs.append(medicine)
+        self._set_classification(medicine, group, detail, append=True)
+        self._write(drugs)
+        self.load()
+        refreshed = next(
+            (drug for drug in self.drugs
+             if self.drug_identity(drug) == self.drug_identity(medicine)), medicine)
+        return refreshed, created
+
+    def delete_drug(self, target: Drug) -> bool:
+        """Delete exactly one matching product row from the local database."""
+        wanted = self.drug_identity(target)
+        remaining: List[Drug] = []
+        deleted = False
+        for drug in self.drugs:
+            if not deleted and self.drug_identity(drug) == wanted:
+                deleted = True
+                continue
+            remaining.append(drug)
+        if not deleted:
+            return False
+        self._write(remaining)
+        self.load()
+        return True
+
     @staticmethod
     def _dict_to_drug(rec: Dict[str, str]) -> "Drug":
-        return Drug(
+        drug = Drug(
             generic_name=rec.get("generic_name", "").strip(),
             brand_name=rec.get("brand_name", "").strip(),
             strength=rec.get("strength", "").strip(),
@@ -426,6 +546,95 @@ class DrugDatabase:
             class_mappings=rec.get("class_mappings", "").strip(),
             mapping_status=rec.get("mapping_status", "").strip(),
             notes=rec.get("notes", "").strip(),
+        )
+        DrugDatabase._normalise_imported_classification(drug)
+        return drug
+
+    @staticmethod
+    def _normalise_imported_classification(drug: "Drug") -> None:
+        """Canonicalise imported mappings and reject phantom major groups."""
+        import drug_classes as classes
+
+        pairs: List[tuple[str, str]] = []
+        unrecognized: List[tuple[str, str]] = []
+        inferred = False
+
+        def add_pair(raw_group: str, raw_detail: str) -> bool:
+            nonlocal inferred
+            legacy = classes.classify(
+                drug.generic_name, drug.category, raw_group, raw_detail)
+            if raw_group.strip() == "pediatric_fluids" and legacy:
+                pair = (legacy.code, legacy.detail)
+                if pair not in pairs:
+                    pairs.append(pair)
+                    inferred = True
+                return True
+            group = classes.resolve_group_code(raw_group)
+            detail = classes.resolve_detailed_class(group, raw_detail)
+            if not group and raw_detail:
+                group, detail = classes.group_for_detailed_class(raw_detail)
+                inferred = inferred or bool(group)
+            # Keep explicitly supplied but unknown class text visible for
+            # clinician review.  It must not silently become "Other".
+            if group and raw_detail.strip() and not detail:
+                unrecognized.append((group, raw_detail.strip()))
+                return False
+            if group and not detail:
+                detail = classes.resolve_detailed_class(group, drug.category)
+            if group and not detail:
+                suggestion = (classes.classify(drug.generic_name, drug.category)
+                              or classes.classify(drug.brand_name, drug.category))
+                if suggestion and suggestion.code == group:
+                    detail = suggestion.detail
+                    inferred = True
+            if group and not detail:
+                configured = classes.subclasses_for(group)
+                if len(configured) == 1:
+                    detail = configured[0]
+                    inferred = True
+                elif "Other" in configured:
+                    detail = "Other"
+                    inferred = True
+            pair = (group, detail)
+            if all(pair) and pair not in pairs:
+                pairs.append(pair)
+                return True
+            return False
+
+        for item in str(drug.class_mappings or "").split("|"):
+            group, separator, detail = item.partition("::")
+            if separator:
+                add_pair(group.strip(), detail.strip())
+        if drug.therapeutic_group or drug.detailed_class:
+            add_pair(drug.therapeutic_group, drug.detailed_class)
+
+        if not pairs and unrecognized:
+            drug.therapeutic_group, drug.detailed_class = unrecognized[0]
+            drug.class_mappings = ""
+            drug.mapping_status = "unrecognized"
+            return
+
+        if not pairs:
+            suggestion = (classes.classify(drug.generic_name, drug.category)
+                          or classes.classify(drug.brand_name, drug.category))
+            if suggestion:
+                pairs.append((suggestion.code, suggestion.detail))
+                inferred = True
+
+        if not pairs:
+            drug.therapeutic_group = ""
+            drug.detailed_class = ""
+            drug.class_mappings = ""
+            drug.mapping_status = ""
+            return
+
+        drug.therapeutic_group, drug.detailed_class = pairs[0]
+        drug.class_mappings = "|".join(
+            f"{group}::{detail}" for group, detail in pairs)
+        status = str(drug.mapping_status or "").casefold()
+        drug.mapping_status = (
+            "suggested" if inferred else
+            status if status in {"confirmed", "suggested"} else "confirmed"
         )
 
     def export_csv(self, dest_path: str) -> None:
@@ -570,6 +779,12 @@ class DrugDatabase:
                 "SELECT 1 FROM drugs WHERE " + " OR ".join(clauses) + " LIMIT 1",
                 values).fetchone() is not None
 
+    @staticmethod
+    def drug_identity(drug: Drug) -> tuple[str, str, str, str]:
+        """Return the stable identity of one imported product row."""
+        return tuple(_norm(getattr(drug, field, "")) for field in (
+            "generic_name", "brand_name", "strength", "form"))
+
     def update_classification(self, name: str, therapeutic_group: str,
                               detailed_class: str, append: bool = True) -> bool:
         """Persist a clinician-reviewed class mapping for one local medicine."""
@@ -600,6 +815,24 @@ class DrugDatabase:
             self.load()
         return updated
 
+    def update_drug_classifications(self, selected_drugs, therapeutic_group: str,
+                                    detailed_class: str, append: bool = True) -> int:
+        """Persist mappings for the exact selected product rows only."""
+        wanted = {self.drug_identity(drug) for drug in selected_drugs}
+        if not wanted:
+            return 0
+        updated = 0
+        drugs = list(self.drugs)
+        for drug in drugs:
+            if self.drug_identity(drug) not in wanted:
+                continue
+            self._set_classification(drug, therapeutic_group, detailed_class, append)
+            updated += 1
+        if updated:
+            self._write(drugs)
+            self.load()
+        return updated
+
     def classification_states(self, names) -> list[Dict[str, str]]:
         """Capture classification fields so a mapping change can be recovered."""
         wanted = {_norm(str(name)) for name in names if str(name).strip()}
@@ -608,15 +841,37 @@ class DrugDatabase:
                             "class_mappings", "mapping_status"}}
                 for drug in self.drugs if _norm(drug.generic_name) in wanted]
 
+    def classification_states_for_drugs(self, selected_drugs) -> list[Dict[str, str]]:
+        """Capture recoverable mapping state for exact selected product rows."""
+        wanted = {self.drug_identity(drug) for drug in selected_drugs}
+        identity_fields = {"generic_name", "brand_name", "strength", "form"}
+        mapping_fields = {"therapeutic_group", "detailed_class",
+                          "class_mappings", "mapping_status"}
+        return [{key: value for key, value in drug.to_dict().items()
+                 if key in identity_fields | mapping_fields}
+                for drug in self.drugs if self.drug_identity(drug) in wanted]
+
     def restore_classification_states(self, states) -> int:
-        saved = {_norm(str(item.get("generic_name", ""))): item
-                 for item in states if isinstance(item, dict) and item.get("generic_name")}
-        if not saved:
+        valid_states = [item for item in states
+                        if (isinstance(item, dict)
+                            and (item.get("generic_name") or item.get("brand_name")))]
+        exact = {
+            tuple(_norm(str(item.get(field, ""))) for field in (
+                "generic_name", "brand_name", "strength", "form")): item
+            for item in valid_states
+            if any(str(item.get(field, "")).strip()
+                   for field in ("brand_name", "strength", "form"))
+        }
+        legacy = {_norm(str(item.get("generic_name", ""))): item
+                  for item in valid_states
+                  if not any(str(item.get(field, "")).strip()
+                             for field in ("brand_name", "strength", "form"))}
+        if not exact and not legacy:
             return 0
         drugs = list(self.drugs)
         updated = 0
         for drug in drugs:
-            state = saved.get(_norm(drug.generic_name))
+            state = exact.get(self.drug_identity(drug)) or legacy.get(_norm(drug.generic_name))
             if not state:
                 continue
             for key in ("therapeutic_group", "detailed_class", "class_mappings", "mapping_status"):
@@ -644,7 +899,8 @@ class DrugDatabase:
     def _set_classification(cls, drug: Drug, therapeutic_group: str,
                             detailed_class: str, append: bool) -> None:
         pair = (therapeutic_group.strip(), detailed_class.strip())
-        pairs = cls._stored_class_pairs(drug) if append else []
+        pairs = (cls._stored_class_pairs(drug)
+                 if append and drug.mapping_status != "unrecognized" else [])
         if all(pair) and pair not in pairs:
             pairs.append(pair)
         if pairs:

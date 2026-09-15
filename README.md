@@ -57,27 +57,47 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   supplied by an approved clinical data source and governance process.
 
 ## Features
+- **Compact workspace** — 10 px card padding, tighter card gaps, 36 px input
+  fields, and compact action toolbars. The dashboard chevron switches to a
+  62 px icon-only rail with tooltips; its state is remembered. Repeated section
+  titles and decorative bars are removed. Medication preview shares the top
+  toolbar and reserves no space when closed. Clinical warnings remain visible.
 - **Bilingual UI + documents** — switch English / Arabic from the toolbar; the
   app, the PDF, the Word file, and Arabic text shaping all follow.
 - **Prescriber + Patient** shown **side by side** in a compact layout (no fixed
   lengths). Prescriber: name, license No., specialty. Patient: name, age, sex.
-- **Medications** — repeatable rows. Each row shows the **drug name on top**
-  with **Dosage / Frequency / Duration / Notes / Quantity** directly beneath it.
-  Autocomplete from an importable drug database; no fixed drug limit.
+- **Medications** — compact numbered rows: plain number, generic/trade-name
+  box, scientific-name box, then movement and delete icons. Dosage, Frequency,
+  Duration, Notes, and Quantity remain underneath. Add Drug, Starred Drugs, and
+  Save Prescription for Patient share the toolbar below the page title.
+- **Shared edit artwork** — `data/edit-icon.png` is the supplied pencil-and-square
+  image, processed with the built-in image editor. Prompt: remove only the white
+  background (including gaps) to transparency; preserve the black silhouette,
+  proportions, and crisp edges. It is bundled with v4.82 and reused at 18–20 px.
+  Autocomplete from an importable drug database; no fixed drug limit. Quantity
+  is calculated from dose count, frequency, and duration (including compact
+  numeric dose/day inputs), and remains editable when clinical judgment is needed.
 - **Quick prescribing** — press `Ctrl+K` to search patients, treatment templates,
   starred medicines, and drug classes from one keyboard-friendly command box.
-- **History comparison** — a loaded patient's current medicines are compared
-  with the latest saved prescription, highlighting additions, removals, and changes.
+  Its large result menu closes after six seconds or when the user clicks outside it.
+- **Drug-class browser** — detailed-class medicine rows support Use in Rx,
+  mapping, starring, and guarded deletion from the local drug database.
+- **Treatment templates** — compact, tooltip-labelled icon actions create, save,
+  and delete reusable treatment plans.
+- **Patient details and history** — compact demographics, Arabic-aware entry,
+  duplicate detection, saved/modified status, and a collapsible prescription
+  timeline. The current medicines are compared with the latest saved prescription,
+  highlighting additions, removals, and changes.
 - **Recovery centre** — deleted favorites, templates, patients, prescriptions,
   and class mappings can be restored for 30 days from Settings.
 - **Paper size**: A5 / A4 / Letter (whole layout adapts).
 - **Outputs**:
   - **Preview / Print** — full prescription PDF (prescriber, patient, drug
     table, QR).
-  - **Prescription Word Doc Without Header** — a compact editable `.docx`
+  - **Export to Word without Header** — a compact editable `.docx`
     containing the numbered medication lines and QR code without the clinic
     header.
-  - **Prescription Word Doc With Header** — a fully editable `.docx` containing
+  - **Export Word with Header** — a fully editable `.docx` containing
     the clinic header, prescriber and patient details, numbered medication lines,
     and QR code.
 - **Arabic** renders correctly (RTL shaping via arabic-reshaper + python-bidi;
@@ -86,9 +106,17 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
 ## Drug database (autocomplete + import)
 - Ships with `data/drugs.csv` (27 common drugs); copied to AppData on first run.
 - **Import / Replace**: **Settings → Database → Import Database** → any CSV or
-  Excel (`.xls` / `.xlsx`). The required
-  column is the drug name (header `generic_name`, `generic`, `scientific_name`, `inn`,
-  or `name`). Optional: `brand_name`, `strength`, `form`, `category`, `notes`.
+  Excel (`.xls` / `.xlsx`). Each medicine row needs either a scientific/generic
+  name or a trade/brand name; brand-only products are retained. Supported name
+  headers include `generic_name`, `generic`, `scientific_name`, `inn`, `name`,
+  and `brand_name`. Optional: `strength`, `form`, `category`,
+  `therapeutic_group`, `detailed_class`, and `notes`. Imported group labels and
+  detailed classes are normalized to the app taxonomy. Missing detailed classes
+  can receive suggested mappings; explicitly unrecognized class values remain
+  visible as needing review instead of being converted silently to `Other`.
+- The Medication Entry **Generic / trade name** box searches the imported trade
+  field (or a legacy row's only name). The **Scientific name** box searches only
+  the imported scientific / INN field and can offer linked trade names afterward.
 - **Merge**: choose "No" to keep existing drugs and add new ones.
 - **Export**: **Settings → Database → Export Database** saves the current database
   as CSV, XLSX, or legacy XLS.

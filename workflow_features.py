@@ -44,7 +44,23 @@ def compare_prescriptions(current: list[Any], previous: list[Any]) -> dict[str, 
     return result
 
 
-def calculate_medicine_quantity(dosage: str, frequency: str, duration: str) -> str:
+def _quantity_unit_from_form(form: str) -> str:
+    """Return a countable dispensing unit for a database dosage form."""
+    value = _norm(form)
+    for pattern, unit in (
+        (r"tablet|\btab\b|قرص|اقراص|أقراص", "tablet"),
+        (r"capsule|\bcap\b|كبسول", "capsule"),
+        (r"syrup|solution|suspension|\bml\b|مل", "mL"),
+        (r"inhaler|puff|بخ", "puff"),
+        (r"unit|insulin|وحد", "units"),
+    ):
+        if re.search(pattern, value, re.IGNORECASE):
+            return unit
+    return "dose"
+
+
+def calculate_medicine_quantity(dosage: str, frequency: str, duration: str,
+                                form: str = "") -> str:
     """Calculate quantity only when dose, frequency and duration are explicit.
 
     PRN and ambiguous strength-only doses intentionally return an empty string.
@@ -70,7 +86,15 @@ def calculate_medicine_quantity(dosage: str, frequency: str, duration: str) -> s
             dose_value, unit = float(match.group(1)), canonical
             break
     if dose_value is None:
-        return ""
+        # Many prescription workflows enter a simple administration count
+        # (for example dosage ``1``) and keep the tablet/capsule form in the
+        # selected database medicine.  Continue to reject strength-only input
+        # such as ``500 mg`` because that is not a dispensable quantity.
+        bare_dose = re.fullmatch(r"[\d.]+", dose)
+        if not bare_dose:
+            return ""
+        dose_value = float(bare_dose.group(0))
+        unit = _quantity_unit_from_form(form)
 
     per_day = None
     for pattern, value in (
@@ -97,11 +121,15 @@ def calculate_medicine_quantity(dosage: str, frequency: str, duration: str) -> s
         days = duration_value * 30
     elif re.search(r"day|days|يوم|أيام|ايام", dur):
         days = duration_value
+    elif re.fullmatch(r"[\d.]+", dur):
+        # A bare duration is treated as days, matching the duration field's
+        # most common clinical use.
+        days = duration_value
     else:
         return ""
 
     total = dose_value * per_day * days
     display = str(int(total)) if total.is_integer() else f"{total:.1f}".rstrip("0").rstrip(".")
-    if unit in {"tablet", "capsule"} and total != 1:
+    if unit in {"tablet", "capsule", "puff", "dose"} and total != 1:
         unit += "s"
     return f"{display} {unit}"
