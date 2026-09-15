@@ -57,6 +57,35 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   supplied by an approved clinical data source and governance process.
 
 ## Features
+- **Light-blue visual theme** — opaque white rounded cards on a soft-gray
+  workspace, cobalt-blue actions, blue-tinted navigation selections, and charcoal text. Shared
+  neutral surfaces extend to Settings and result lists. The blue is darkened
+  enough for readable white button text; warning/delete colors remain semantic.
+  This is a visual-only change, with no live blur, export, or data changes.
+- **Refined compact controls** — favorite cards retain their natural height;
+  brand inputs are bold, scientific inputs regular, and field labels subdued.
+  The dashboard uses a narrow blue active-page indicator. Medicine and quick
+  search popups fit the screen above/below their field, reserve only the needed
+  result rows, and scroll for longer lists. Existing keyboard selection remains.
+- **Medication tools subpages** — Starred Drugs and Word Preview open in
+  separate views with Back navigation, preserving the medication form and its
+  values. All four medication toolbar buttons use white outlined styling.
+  The main right-edge scrollbar is hidden on Prescriber, Patient, Treatment
+  Template, Interaction Review and Online Drug Reference; wheel scrolling is
+  retained. The latter three pages have additional working-card top spacing.
+- Starred medicine cards use two columns and a single name/instructions line,
+  with a borderless plus action. Long lines use an ellipsis and full-text
+  tooltip. Favorite cards use the same plus action to add to the prescription.
+- Icon tooltips wait 400 ms and ignore pointer movement between internal icon
+  elements, reducing hover flicker. Settings retains two distinct reset scopes
+  (this page/all settings) and Save Changes; closing with X/Escape uses the same
+  unsaved-change confirmation as the removed redundant Cancel button. The
+  native Windows minimize/maximize/close title-bar controls remain unchanged.
+- **Word with Header** retains the clinic logo/name/contact details, followed
+  by one prescriber/specialty/license paragraph and one date/prescription-number
+  paragraph. It omits the prescription title/subtitle and closing signature
+  block. Patient details, numbered medicine lines and QR content remain.
+  The separate Export to Word without Header output is unchanged.
 - **Compact workspace** — 10 px card padding, tighter card gaps, 36 px input
   fields, and compact action toolbars. The dashboard chevron switches to a
   62 px icon-only rail with tooltips; its state is remembered. Repeated section
@@ -104,6 +133,16 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   Tahoma/Arial font on Windows).
 
 ## Drug database (autocomplete + import)
+
+The Drug Classes browser places its two columns directly below the search bar,
+without group/class dropdown filters, an unclassified count line, or group stars.
+Detailed-class medicine pages use a borderless **+** to add a medicine to the Rx.
+Unclassified, suggested, and conflicting mapping review remains in Class Mapping Editor.
+
+Dashboard navigation uses matching 24 px blue line icons, a fixed icon/label gap,
+and a pale-blue active-page highlight with a non-shifting indicator. Dashboard
+icons and the collapse control have no tooltips, including in collapsed mode.
+
 - Ships with `data/drugs.csv` (27 common drugs); copied to AppData on first run.
 - **Import / Replace**: **Settings → Database → Import Database** → any CSV or
   Excel (`.xls` / `.xlsx`). Each medicine row needs either a scientific/generic

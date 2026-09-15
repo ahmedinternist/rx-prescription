@@ -555,7 +555,7 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
     assert "max(540" in template_popup_source
     assert "min(len(matches), 7)" in template_popup_source
     assert "height=46" in template_popup_source
-    assert "size=16" in template_popup_source
+    assert "size=18" in template_popup_source
     assert "load_treatment_template" in template_choice_source
     assert "treatment_template_selector_var" in current_disease_source
     assert "duplicate_treatment_template" not in page_source
@@ -733,6 +733,58 @@ for function, name in [(pdf.generate_prescription_docx, "full-lines.docx"),
     run_isolated(tmp_path, code)
 
 
+def test_headed_word_export_has_compact_identity_without_titles_or_signature(tmp_path):
+    code = '''
+import os
+from pathlib import Path
+from docx import Document
+from PIL import Image
+import i18n as I
+import pdf_generator as pdf
+import qr_utils as q
+root = Path(os.environ["RX_APP_DATA_DIR"])
+logo = root / "sample-logo.png"
+Image.new("RGB", (100, 100), "blue").save(logo)
+rx = q.Prescription(
+    clinic=q.Clinic(name="Clinic Example", address="Clinic Street", phone="123456", logo_path=str(logo)),
+    doctor=q.Doctor(name="Dr Example", specialty="Internal Medicine", license_no="LIC123"),
+    patient=q.Patient(name="Patient Example", age="40"), date="2026-09-15", rx_id="RX123",
+    drugs=[q.DrugItem(brand_name="Brand", generic_name="Scientific", dosage="Dose", frequency="Frequency")])
+for language in ("en", "ar"):
+    I.set_lang(language)
+    path = root / f"headed-{language}.docx"
+    pdf.generate_prescription_docx(rx, path)
+    document = Document(path)
+    paragraphs = [p.text for p in document.paragraphs]
+    assert len(document.inline_shapes) == 1
+    assert document.paragraphs[0]._p.xpath(".//w:drawing")
+    assert paragraphs[1] == "Clinic Example"
+    assert paragraphs[2] == "Clinic Street  |  123456"
+    assert all(value in paragraphs[3] for value in ("Dr Example", "Internal Medicine", "LIC123"))
+    assert all(value in paragraphs[4] for value in ("2026-09-15", "RX123"))
+    assert "Patient Example" in paragraphs[5]
+    assert I.t("pdf_title") not in paragraphs and I.t("pdf_subtitle") not in paragraphs
+    full_text = "\\n".join(paragraphs)
+    assert I.t("pdf_signature") not in full_text
+    assert full_text.count("Dr Example") == full_text.count("LIC123") == 1
+    assert not document.tables
+    assert any(p.startswith("1.") and "Brand" in p and "Dose" in p for p in paragraphs)
+    # The old unheaded path keeps its separate identity fields and signature.
+    pdf.generate_prescription_docx(rx, root / "unheaded.docx", show_header=False)
+    unheaded = [p.text for p in Document(root / "unheaded.docx").paragraphs]
+    assert "Dr Example" in unheaded[0] and "Internal Medicine" in unheaded[1]
+    assert "LIC123" in unheaded[2]
+    assert any(I.t("pdf_signature") in p for p in unheaded)
+    assert "Clinic Example" not in "\\n".join(unheaded)
+    # Export without Header uses this distinct medication-only generator.
+    pdf.generate_medication_label_docx(rx, root / "medication-only.docx")
+    plain = "\\n".join(p.text for p in Document(root / "medication-only.docx").paragraphs)
+    assert "Dr Example" not in plain and "Clinic Example" not in plain
+    assert "Brand" in plain and "Dose" in plain
+'''
+    run_isolated(tmp_path, code)
+
+
 def test_frequency_picker_has_the_requested_clinical_presets():
     from main import FREQUENCY_OPTIONS
 
@@ -772,7 +824,7 @@ def test_visual_layout_constants_are_compact_and_consistent():
     assert 'pady=(4, 6)' in inspect.getsource(SettingsWindow._new_page)
 
 
-def test_dashboard_density_preserves_navigation_and_has_readable_tooltips(monkeypatch):
+def test_dashboard_density_preserves_navigation_without_tooltips(monkeypatch):
     from types import SimpleNamespace
     from main import App, DASHBOARD_WIDTH, DASHBOARD_COLLAPSED_WIDTH
     import config as cfg
@@ -809,7 +861,23 @@ def test_dashboard_density_preserves_navigation_and_has_readable_tooltips(monkey
     assert ui.dashboard_footer.visible
     assert saved == [("dashboard_collapsed", False)]
     import inspect
-    assert "_attach_class_tooltip(button, text)" in inspect.getsource(App._add_page_button)
+    assert "_attach_class_tooltip" not in inspect.getsource(App._add_page_button)
+    assert "_attach_class_tooltip" not in inspect.getsource(App._add_dashboard_action)
+    assert "_attach_class_tooltip(self.dashboard_toggle" not in inspect.getsource(App._build_ui)
+
+
+def test_dashboard_line_icons_are_distinct_transparent_and_consistent():
+    from main import NAV_ICONS, DASHBOARD_ICON_SIZE, _dashboard_icon_artwork
+    assert DASHBOARD_ICON_SIZE == 24
+    fingerprints = set()
+    for key in NAV_ICONS:
+        image = _dashboard_icon_artwork(key)
+        assert image.mode == "RGBA" and image.size == (96, 96)
+        assert image.getpixel((0, 0))[3] == 0
+        assert image.getbbox() is not None
+        assert _dashboard_icon_artwork(key) is image
+        fingerprints.add(image.tobytes())
+    assert len(fingerprints) == len(NAV_ICONS)
 
 
 def test_compact_sections_remove_decoration_and_repeated_titles():
@@ -818,14 +886,39 @@ def test_compact_sections_remove_decoration_and_repeated_titles():
     assert PAD == 10
     assert ICON_BUTTON_SIZE == 30
     section = inspect.getsource(App.section)
-    assert 'pady=4' in section
+    assert 'pady=CARD_GAP' in section
     assert 'height=4' not in section
     forms = inspect.getsource(App.build_forms)
     for page in ("prescriber", "favorites", "reference", "interaction_review"):
         assert f'self.section(self.pages["{page}"], "")' in forms
     assert "self.busy_label.pack_forget()" in inspect.getsource(App.submit_background)
     assert 'medication_toolbar, text=I.t("show_word_preview")' in forms
-    assert "self.word_preview_section.pack_forget()" in inspect.getsource(App.toggle_word_preview)
+    assert "self.word_preview_section.pack_forget()" in inspect.getsource(App.close_medication_subpage)
+
+
+def test_light_reference_palette_has_readable_contrast_and_neutral_surfaces():
+    import inspect
+    import main
+
+    def luminance(hex_color):
+        channels = [int(hex_color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+        linear = [channel / 12.92 if channel <= 0.04045
+                  else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
+        return sum(channel * weight for channel, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    def contrast(first, second):
+        light, dark = sorted((luminance(first), luminance(second)), reverse=True)
+        return (light + 0.05) / (dark + 0.05)
+
+    assert main.CARD == "#ffffff"
+    assert main.BG == "#f3f5f8"
+    assert main.ICON_BLUE == main.ACCENT
+    assert contrast(main.CARD, main.ACCENT) >= 4.5
+    assert contrast(main.TEXT, main.BG) >= 7
+    assert contrast(main.MUTED, main.SURFACE) >= 4.5
+    source = inspect.getsource(main)
+    for obsolete_tint in ("#f8fcfb", "#fbfdfd", "#edf5f3", "#167d78"):
+        assert obsolete_tint not in source
 
 
 def test_export_patient_and_favorite_actions_use_compact_requested_layout():
@@ -888,7 +981,7 @@ def test_medication_cards_use_compact_header_actions_without_duplicate_or_hints(
     assert 'I.t("page_patient_help")' not in form_source
     assert 'I.t("page_favorites_help")' not in form_source
     assert 'I.t("page_drug_classes_help")' not in form_source
-    assert 'dr = self.section(self.pages["medications"], "")' in form_source
+    assert 'dr = self.section(self.medication_main, "")' in form_source
 
 
 def test_shared_edit_artwork_has_transparency_and_is_used_on_all_edit_buttons():
@@ -1005,8 +1098,16 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     assert "import_confirmed_mappings" in import_source
     assert "import_suggested_mappings" in import_source
     assert "import_changed_missing" in import_source
-    assert "class_group_filter_var" in form_source
-    assert "class_detail_filter_var" in form_source
+    assert "class_group_filter_var" not in form_source
+    assert "class_detail_filter_var" not in form_source
+    assert "class_filters" not in form_source
+    assert "unclassified_label" not in form_source
+    assert "class_favorite_buttons" not in form_source
+    assert "toggle_therapeutic_group_favorite" not in form_source
+    assert 'text="+"' in detail_row_source
+    assert 'I.t("favorite_use_rx")' not in detail_row_source
+    assert "self.add_drug_database_item(item)" in detail_row_source
+    assert 'self._attach_class_tooltip(add_button, I.t("add_drug"))' in detail_row_source
     assert "class_name_filter_var" not in form_source
     assert "class_name_filter_menu" not in form_source
     assert "class_starred_filter_var" not in form_source
@@ -1015,8 +1116,8 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     assert "class_unclassified_panel" in form_source
     assert "class_left_panel.pack_forget" in unclassified_mode_source
     assert "class_right_panel.pack_forget" in unclassified_mode_source
-    assert "class_group_filter_menu.pack_forget" in unclassified_mode_source
-    assert "class_detail_filter_menu.pack_forget" in unclassified_mode_source
+    assert "class_group_filter_menu" not in unclassified_mode_source
+    assert "class_detail_filter_menu" not in unclassified_mode_source
     assert "_unclassified_page_size = 24" in unclassified_source
     assert "_append_unclassified_class_search_page" in unclassified_source
     assert "start + self._unclassified_page_size" in unclassified_page_source
@@ -1287,11 +1388,148 @@ def test_quick_prescribe_autocomplete_uses_large_result_menu():
     from main import App
 
     source = inspect.getsource(App._render_quick_results)
-    assert "height=min(18, len(results))" in source
-    assert "width=138" in source
-    assert '("Segoe UI", 18)' in source
+    assert "height=min(10, len(results))" in source
+    assert "fit_autocomplete_popup" in source
+    assert '("Segoe UI", 20)' in source
     assert "after(6000, self._expire_quick_results)" in source
     assert "_quick_click_outside" in inspect.getsource(App._build_quick_prescribe)
+
+
+def test_autocomplete_layout_fits_screen_and_uses_only_needed_rows():
+    from main import autocomplete_layout
+
+    for screen in ((0, 0, 1366, 768), (0, 0, 1920, 1080), (-1920, 0, 1920, 1080)):
+        sx, sy, sw, sh = screen
+        for anchor in ((sx + 20, sy + 80, 280, 36),
+                       (sx + sw - 180, sy + sh - 80, 160, 36)):
+            for count in (1, 2, 20, 30):
+                width, height, x, y, rows = autocomplete_layout(
+                    anchor, screen, 2200, 49, count)
+                assert sx + 10 <= x and x + width <= sx + sw - 10
+                assert sy + 10 <= y and y + height <= sy + sh - 10
+                assert 1 <= rows <= min(count, 10)
+                assert height == rows * 49 + 8
+                if count <= 2:
+                    assert rows == count
+
+
+def test_refined_typography_spacing_and_sidebar_selection():
+    import inspect
+    from main import App, DrugRow, BRAND_FONT, SCIENTIFIC_FONT, LABEL_FONT, CARD_GAP
+
+    assert BRAND_FONT[:2] == SCIENTIFIC_FONT
+    assert BRAND_FONT[-1] == "bold" and len(SCIENTIFIC_FONT) == 2
+    assert len(LABEL_FONT) == 2 and CARD_GAP == 4
+    row = inspect.getsource(DrugRow.__init__)
+    assert "font=BRAND_FONT" in row and "font=SCIENTIFIC_FONT" in row
+    assert 'sticky="new", padx=CARD_GAP, pady=CARD_GAP' in inspect.getsource(App._render_favorite_card)
+    assert "_selection_indicator" in inspect.getsource(App.show_page)
+    assert "fg_color=ACCENT_SOFT if name == key" in inspect.getsource(App.show_page)
+    for method in (DrugRow._show_ac, App._show_favorite_autocomplete, App._render_quick_results):
+        assert "fit_autocomplete_popup" in inspect.getsource(method)
+
+
+def test_medication_secondary_tools_use_exclusive_subpages():
+    from types import SimpleNamespace
+    from main import App, SCROLLBAR_HIDDEN_PAGES
+
+    class Widget:
+        def __init__(self):
+            self.visible = False
+            self.options = {}
+        def pack(self, **kwargs):
+            self.visible = True
+        def pack_forget(self):
+            self.visible = False
+        def configure(self, **kwargs):
+            self.options.update(kwargs)
+
+    ui = SimpleNamespace(
+        rows=[], _hide_quick_results=lambda: None,
+        medication_main=Widget(), medication_subpage=Widget(),
+        medication_favorite_panel=Widget(), word_preview_section=Widget(),
+        word_preview_body=Widget(), medication_subpage_title=Widget(),
+        scroll=SimpleNamespace(_parent_canvas=SimpleNamespace(yview_moveto=lambda value: None)))
+    App.open_medication_subpage(ui, "starred")
+    assert ui.medication_subpage.visible and ui.medication_favorite_panel.visible
+    assert not ui.medication_main.visible and not ui.word_preview_section.visible
+    assert not ui.word_preview_visible
+    App.open_medication_subpage(ui, "preview")
+    assert ui.word_preview_section.visible and ui.word_preview_visible
+    assert not ui.medication_main.visible and not ui.medication_favorite_panel.visible
+    App.close_medication_subpage(ui)
+    assert ui.medication_main.visible and not ui.medication_subpage.visible
+    assert not ui.word_preview_visible
+    assert SCROLLBAR_HIDDEN_PAGES == {
+        "prescriber", "patient", "treatment_templates", "interaction_review", "reference"}
+
+
+def test_starred_cards_are_single_line_two_column_with_plus_actions():
+    import inspect
+    from main import App
+
+    source = inspect.getsource(App.refresh_medication_favorite_picker)
+    assert 'row=shown // 2, column=shown % 2' in source
+    assert 'f"{name}   ·   {regimen}"' in source
+    assert 'text="+"' in source and 'wraplength=0' in source
+    assert 'text=I.t("favorite_use_rx")' not in source
+    assert 'text="+"' in inspect.getsource(App._render_favorite_card)
+    assert 'pady=(12, 6)' in inspect.getsource(App.build_forms)
+
+    class Font:
+        def measure(self, text):
+            return len(text) * 6
+    class Label:
+        text = ""
+        def cget(self, option):
+            return Font()
+        def configure(self, **kwargs):
+            self.text = kwargs["text"]
+
+    label = Label()
+    App.fit_starred_medicine_line(label, "Brand · Scientific · Dose", 600)
+    assert label.text == "Brand · Scientific · Dose"
+    App.fit_starred_medicine_line(label, "Brand · Scientific · Dose", 60)
+    assert label.text.endswith("…") and Font().measure(label.text) <= 60
+
+
+def test_tooltip_hover_is_debounced_and_ignores_internal_leave_events():
+    from types import SimpleNamespace
+    import inspect
+    from main import App, SettingsWindow
+
+    jobs, delays = {}, []
+    def after(delay, callback):
+        key = str(len(delays))
+        jobs[key] = callback
+        delays.append(delay)
+        return key
+    ui = SimpleNamespace(after=after, after_cancel=lambda key: jobs.pop(key, None),
+                         winfo_pointerxy=lambda: (50, 50), inside=True)
+    ui._point_inside_widget = lambda widget, x, y: ui.inside
+    ui._cancel_tooltip_job = lambda name: App._cancel_tooltip_job(ui, name)
+    ui._hide_class_tooltip = lambda: App._hide_class_tooltip(ui)
+    ui._show_class_tooltip = lambda widget, text: None
+    ui._check_tooltip_leave = lambda widget: App._check_tooltip_leave(ui, widget)
+    owner = object()
+    App._schedule_class_tooltip(ui, owner, "Delete")
+    first_job = ui._tooltip_show_job
+    App._schedule_class_tooltip(ui, owner, "Delete")
+    assert ui._tooltip_show_job == first_job and delays == [400]
+    App._schedule_tooltip_leave(ui, owner)
+    jobs.pop(ui._tooltip_leave_job)()
+    assert ui._tooltip_owner is owner and first_job in jobs
+    ui.inside = False
+    App._schedule_tooltip_leave(ui, owner)
+    jobs.pop(ui._tooltip_leave_job)()
+    assert ui._tooltip_owner is None and not jobs
+    source = inspect.getsource(App._show_class_tooltip)
+    assert source.index("tip.withdraw()") < source.index("tip.deiconify()")
+    assert "widget.winfo_height() + 8" in source
+    footer = inspect.getsource(SettingsWindow._build_footer)
+    assert 'I.t("settings_cancel")' not in footer
+    assert "self.restore_defaults" in footer and "self.reset_all_settings" in footer
+    assert 'self.protocol("WM_DELETE_WINDOW", self.cancel)' in inspect.getsource(SettingsWindow.__init__)
 
 
 def test_quantity_calculator_accepts_compact_clinical_inputs():

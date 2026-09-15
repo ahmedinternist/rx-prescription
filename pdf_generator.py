@@ -357,7 +357,7 @@ def generate_prescription_docx(
     style.font.name = "Calibri"
     style.font.size = Pt(10)
 
-    # Clinic identity and title
+    # Clinic letterhead (no prescription title/subtitle in the headed export).
     logo_width = {"small": .7, "medium": .9, "large": 1.15}.get(
         str(logo_size).casefold(), .9)
     if show_header and rx.clinic.logo_path and Path(rx.clinic.logo_path).is_file():
@@ -368,37 +368,50 @@ def generate_prescription_docx(
         clinic_title = doc.add_paragraph()
         clinic_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         clinic_title.add_run(rx.clinic.name).bold = True
+    if show_header:
         clinic_bits = [rx.clinic.address, rx.clinic.phone]
         if any(clinic_bits):
             clinic_line = doc.add_paragraph("  |  ".join(x for x in clinic_bits if x))
             clinic_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if show_header:
-        t = doc.add_paragraph()
-        t.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = t.add_run(I.t("pdf_title"))
-        run.bold = True
-        run.font.size = Pt(20)
-        run.font.color.rgb = navy
-        sub = doc.add_paragraph()
-        sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = sub.add_run(I.t("pdf_subtitle"))
-        r.font.color.rgb = muted
-        r.font.size = Pt(11)
 
     def labelled(label, value):
         p = doc.add_paragraph()
         rl = p.add_run(label + "  ")
         rl.bold = True
-        rl.font.color.rgb = navy
+        rl.font.color.rgb = RGBColor(0, 0, 0) if show_header else navy
         p.add_run(value)
         return p
 
-    if rx.doctor.name:
-        labelled(I.t("pdf_prescriber") + ":", rx.doctor.name)
-    if rx.doctor.specialty:
-        labelled(I.t("specialty") + ":", rx.doctor.specialty)
-    if rx.doctor.license_no:
-        labelled(I.t("license") + ":", rx.doctor.license_no)
+    def inline_fields(fields):
+        paragraph = doc.add_paragraph()
+        paragraph.paragraph_format.space_after = Pt(4)
+        for index, (label, value) in enumerate(fields):
+            if index:
+                paragraph.add_run("     |     ")
+            paragraph.add_run(label + "  ").bold = True
+            paragraph.add_run(value)
+        return paragraph
+
+    if show_header:
+        doctor_fields = [
+            (I.t("pdf_prescriber") + ":", rx.doctor.name),
+            (I.t("specialty") + ":", rx.doctor.specialty),
+            (I.t("license") + ":", rx.doctor.license_no),
+        ]
+        doctor_fields = [(label, value) for label, value in doctor_fields if value]
+        if doctor_fields:
+            inline_fields(doctor_fields)
+        date_fields = [(I.t("pdf_date"), rx.date or "—")]
+        if rx.rx_id:
+            date_fields.append((I.t("pdf_rx"), rx.rx_id))
+        inline_fields(date_fields)
+    else:
+        if rx.doctor.name:
+            labelled(I.t("pdf_prescriber") + ":", rx.doctor.name)
+        if rx.doctor.specialty:
+            labelled(I.t("specialty") + ":", rx.doctor.specialty)
+        if rx.doctor.license_no:
+            labelled(I.t("license") + ":", rx.doctor.license_no)
     if rx.patient.name:
         labelled(I.t("pdf_patient") + ":", rx.patient.name)
     pat_bits = []
@@ -416,21 +429,23 @@ def generate_prescription_docx(
         labelled("Diagnosis:", rx.diagnosis)
     if rx.refills:
         labelled("Refills:", rx.refills)
-    labelled(I.t("pdf_date"), rx.date or "—")
-    if rx.rx_id:
-        labelled(I.t("pdf_rx"), rx.rx_id)
+    if not show_header:
+        labelled(I.t("pdf_date"), rx.date or "—")
+        if rx.rx_id:
+            labelled(I.t("pdf_rx"), rx.rx_id)
 
     doc.add_paragraph()
 
     _append_word_medication_lines(doc, rx.drugs)
 
-    doc.add_paragraph()
-    sig = doc.add_paragraph()
-    sig.add_run(I.t("pdf_signature") + "\n").bold = True
-    if rx.doctor.name:
-        sig.add_run(rx.doctor.name + "\n")
-    if rx.doctor.license_no:
-        sig.add_run(f"{I.t('license')}: {rx.doctor.license_no}")
+    if not show_header:
+        doc.add_paragraph()
+        sig = doc.add_paragraph()
+        sig.add_run(I.t("pdf_signature") + "\n").bold = True
+        if rx.doctor.name:
+            sig.add_run(rx.doctor.name + "\n")
+        if rx.doctor.license_no:
+            sig.add_run(f"{I.t('license')}: {rx.doctor.license_no}")
 
     if qr_pil_image is not None:
         import tempfile as _tf
