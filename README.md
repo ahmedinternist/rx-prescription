@@ -57,27 +57,44 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   supplied by an approved clinical data source and governance process.
 
 ## Features
-- **Light-blue visual theme** — opaque white rounded cards on a soft-gray
-  workspace, cobalt-blue actions, blue-tinted navigation selections, and charcoal text. Shared
-  neutral surfaces extend to Settings and result lists. The blue is darkened
-  enough for readable white button text; warning/delete colors remain semantic.
-  This is a visual-only change, with no live blur, export, or data changes.
+- **Portable glass-inspired dashboard** — a white/light-gray gradient, frosted
+  sidebar, search bar, medication/section cards and export footer, with opaque white
+  editable fields and charcoal text. Saturated-blue actions and blue navigation selections
+  remain consistent; warning/delete colors stay semantic. Glass is simulated
+  with static, cached textures rather than Windows-only acrylic or real window
+  transparency. Panels sample their position in a shared white/cool-gray backdrop,
+  with static inset shadows and restrained cool edge highlights.
+  White-gradient reflections add a top-edge glint and lower diffuse haze instead
+  of solid panel fills; the shared backdrop has a matching soft white gradient.
+  Favorites, templates, class panels, patient-history cards, reference cards and Settings use the
+  same surfaces. Selected-card colors remain visible. A bounded interpreter-local
+  weak cache includes position, dimensions and tint; hidden/off-screen panels
+  release their images. Scrolling and resizing are debounced, with no live blur
+  or animation loop. Search focus changes its outline without shifting geometry.
+  This styling does not change prescriptions, exports or saved data (v4.82).
 - **Refined compact controls** — favorite cards retain their natural height;
   brand inputs are bold, scientific inputs regular, and field labels subdued.
-  The dashboard uses a narrow blue active-page indicator. Medicine and quick
+  Dashboard and Settings share 24 px rounded line icons, blue when inactive and
+  teal when selected, with a pale teal selection and fixed slim indicator.
+  Settings keeps its existing ungrouped section order, uses compact navigation
+  rows with stationary hover feedback, and neutral borderless content cards.
+  Medicine and quick
   search popups fit the screen above/below their field, reserve only the needed
   result rows, and scroll for longer lists. Existing keyboard selection remains.
 - **Medication tools subpages** — Starred Drugs and Word Preview open in
   separate views with Back navigation, preserving the medication form and its
-  values. All four medication toolbar buttons use white outlined styling.
+  values. All four medication toolbar buttons use outlined surface styling.
   The main right-edge scrollbar is hidden on Prescriber, Patient, Treatment
   Template, Interaction Review and Online Drug Reference; wheel scrolling is
   retained. The latter three pages have additional working-card top spacing.
 - Starred medicine cards use two columns and a single name/instructions line,
-  with a borderless plus action. Long lines use an ellipsis and full-text
-  tooltip. Favorite cards use the same plus action to add to the prescription.
-- Icon tooltips wait 400 ms and ignore pointer movement between internal icon
-  elements, reducing hover flicker. Settings retains two distinct reset scopes
+  with a borderless plus action. Long lines use an ellipsis; adding the medicine
+  preserves its complete value. Favorite cards use the same plus action.
+- Tooltips are removed from every page and subpage. The main search dropdown
+  aligns with the full search bar, limits width rather than shifting sideways,
+  and uses 21-point result text (5% larger). Settings omits the repeated label
+  below its search, retains the native Settings window title, and adds 32 px
+  of white bottom padding beneath the footer buttons. Settings retains two distinct reset scopes
   (this page/all settings) and Save Changes; closing with X/Escape uses the same
   unsaved-change confirmation as the removed redundant Cancel button. The
   native Windows minimize/maximize/close title-bar controls remain unchanged.
@@ -133,6 +150,38 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   Tahoma/Arial font on Windows).
 
 ## Drug database (autocomplete + import)
+
+Treatment Template has two views: **New Template** opens the existing disease
+and medicine editor; **Saved Templates** shows searchable A–Z cards, expandable
+treatment details, and Add to Rx, Edit, and confirmed Delete actions. Saving
+returns to the browser and highlights the saved template. Leaving a changed
+editor prompts before discarding changes. Existing template storage, medicine
+fields, OR alternatives, recovery, and Settings database import/export remain.
+
+Online Drug Reference presents five expandable, color-coded label sections:
+Indication (teal), Dose (blue), Contraindications (red), Pregnancy (amber), and
+Renal Adjustment (purple), replacing the previous Interaction section. Cards
+use independent vertical columns on wide pages to avoid uneven row-height gaps,
+and stack in section order on narrow pages. Medicine identity, FDA label,
+label/check dates and View Full Label share one compact header row; the excerpt
+disclaimer footer is omitted. Missing information
+is explicitly marked as not stated. Indications and dose come from the label's
+corresponding fields; renal excerpts come from topic-containing dosage,
+population, precaution, or contraindication sections, not inferred dose rules.
+Expand a card for full extracted context or use View Full Label; cards do not
+include a bottom Open label source link. The page has no introductory subtitle.
+See the [official openFDA label fields](https://open.fda.gov/apis/drug/label/searchable-fields/).
+The page also supports a medicine search independent of Medication Entry,
+searchable full-label viewing with highlighted matches and larger bold section
+24-point headings, excluding Pediatric Use, How Supplied, Warnings and Cautions,
+Use in Specific Populations, Clinical Studies and Clinical Pharmacology,
+section-source labels,
+and effective-date warnings. Dose displays explicit label dosage plus separately
+identified adult, maximum, route, and hepatic statements when those are actually
+present; it does not add a pediatric-dose section. Renal information is marked
+as a stated adjustment, precaution-only text, or not found. Successful results
+are cached for seven days inside the app's Windows-encrypted settings, visibly
+marked when reused, and can be refreshed or cleared from the page.
 
 The Drug Classes browser places its two columns directly below the search bar,
 without group/class dropdown filters, an unclassified count line, or group stars.

@@ -516,6 +516,55 @@ for extension in (".csv", ".xlsx", ".xls"):
     run_isolated(tmp_path, code)
 
 
+def test_treatment_template_draft_guard_ignores_visual_state_and_preserves_cancel(monkeypatch):
+    from types import SimpleNamespace
+    from main import App
+    import main
+    class Var:
+        def __init__(self, value): self.value = value
+        def get(self): return self.value
+        def set(self, value): self.value = value
+    ui = SimpleNamespace(
+        _treatment_view="editor", treatment_disease_var=Var("Example"),
+        treatment_template_selector_var=Var("Example"),
+        _treatment_template_drugs=[{"brand_name": "Brand", "dosage": "10 mg", "_editor_open": False}],
+        _treatment_draft_signature=App._treatment_draft_signature,
+        render_treatment_template_drugs=lambda: None)
+    ui._current_treatment_disease = lambda: ui.treatment_disease_var.get()
+    App._capture_treatment_baseline(ui)
+    calls = []
+    monkeypatch.setattr(main.messagebox, "askyesno", lambda *args, **kwargs: calls.append(args) or False)
+    ui._treatment_template_drugs[0]["_editor_open"] = True
+    assert App._confirm_treatment_leave(ui) is True
+    assert not calls
+    ui._treatment_template_drugs[0]["dosage"] = "20 mg"
+    assert App._confirm_treatment_leave(ui) is False
+    assert ui._treatment_template_drugs[0]["dosage"] == "20 mg"
+    assert ui._treatment_baseline_drugs[0]["dosage"] == "10 mg"
+    monkeypatch.setattr(main.messagebox, "askyesno", lambda *args, **kwargs: True)
+    assert App._confirm_treatment_leave(ui) is True
+    assert ui._treatment_template_drugs[0]["dosage"] == "10 mg"
+
+
+def test_treatment_template_split_views_preserve_record_actions():
+    import inspect
+    from main import App
+    browser = inspect.getsource(App.refresh_saved_treatment_templates)
+    assert "sorted(cfg.config.treatment_templates()" in browser
+    assert "use_saved_treatment_template" in browser
+    assert "edit_saved_treatment_template" in browser
+    assert "delete_saved_treatment_template" in browser
+    assert "toggle_saved_treatment_template" in browser
+    assert "_treatment_saved_limit" in browser
+    assert "show_treatment_saved_templates(selected_id=saved_id)" in inspect.getsource(App.save_treatment_template)
+    assert "_confirm_treatment_leave" in inspect.getsource(App.show_page)
+    assert "_confirm_treatment_leave" in inspect.getsource(App.confirm_close)
+    deletion = inspect.getsource(App.delete_saved_treatment_template)
+    assert deletion.index("askyesno") < deletion.index("remove_treatment_template")
+    assert "add_recovery_item" in deletion
+    assert 'medicines=template["medications"]' in inspect.getsource(App.use_saved_treatment_template)
+
+
 def test_treatment_template_dashboard_page_uses_current_drug_database():
     import inspect
     import i18n as I
@@ -560,12 +609,15 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
     assert "treatment_template_selector_var" in current_disease_source
     assert "duplicate_treatment_template" not in page_source
     assert not hasattr(App, "duplicate_treatment_template")
-    assert 'text="＋"' in page_source
+    assert 'text="＋ " + I.t("treatment_new_view")' in page_source
+    assert "treatment_editor_view" in page_source
+    assert "treatment_saved_view" in page_source
+    assert "treatment_saved_search_var" in page_source
     assert 'text="💾"' in page_source
     assert 'text="🗑"' in page_source
     assert page_source.count('fg_color="transparent"') >= 4
-    assert page_source.count("border_width=0") >= 3
-    assert "_attach_class_tooltip" in page_source
+    assert page_source.count("border_width=0") >= 2
+    assert "_attach_class_tooltip" not in page_source
     assert "_on_treatment_template_focus_in" in page_source
     assert "backup_treatment_templates" not in page_source
     assert "restore_treatment_templates" not in page_source
@@ -880,6 +932,29 @@ def test_dashboard_line_icons_are_distinct_transparent_and_consistent():
     assert len(fingerprints) == len(NAV_ICONS)
 
 
+def test_settings_line_icons_share_dashboard_style_and_stable_navigation():
+    import inspect
+    from main import SettingsWindow, _dashboard_icon_artwork, NAV_ACTIVE, ICON_BLUE
+    fingerprints = set()
+    for key, _symbol, _label in SettingsWindow.SECTIONS:
+        normal = _dashboard_icon_artwork(key, ICON_BLUE)
+        active = _dashboard_icon_artwork(key, NAV_ACTIVE)
+        assert normal.size == active.size == (96, 96)
+        assert normal.getpixel((0, 0))[3] == active.getpixel((0, 0))[3] == 0
+        assert normal.getbbox() is not None and active.getbbox() == normal.getbbox()
+        assert normal.tobytes() != active.tobytes()
+        fingerprints.add(normal.tobytes())
+    assert len(fingerprints) == len(SettingsWindow.SECTIONS)
+    workspace = inspect.getsource(SettingsWindow._build_workspace)
+    assert '_glyph_icon(' not in workspace
+    assert 'height=38' in workspace and '_image_label_spacing = 10' in workspace
+    assert '_attach_class_tooltip' not in workspace
+    selection = inspect.getsource(SettingsWindow._show_section)
+    assert 'NAV_ACTIVE_SOFT' in selection and 'place(x=0' in selection
+    assert 'font=_ui_font(16)' in selection
+    assert 'border_width=0' in inspect.getsource(SettingsWindow._card)
+
+
 def test_compact_sections_remove_decoration_and_repeated_titles():
     import inspect
     from main import App, PAD, ICON_BUTTON_SIZE
@@ -896,7 +971,7 @@ def test_compact_sections_remove_decoration_and_repeated_titles():
     assert "self.word_preview_section.pack_forget()" in inspect.getsource(App.close_medication_subpage)
 
 
-def test_light_reference_palette_has_readable_contrast_and_neutral_surfaces():
+def test_glass_palette_has_readable_contrast_and_opaque_input_surfaces():
     import inspect
     import main
 
@@ -910,12 +985,18 @@ def test_light_reference_palette_has_readable_contrast_and_neutral_surfaces():
         light, dark = sorted((luminance(first), luminance(second)), reverse=True)
         return (light + 0.05) / (dark + 0.05)
 
-    assert main.CARD == "#ffffff"
-    assert main.BG == "#f3f5f8"
+    assert main.CARD == "#e9eaec"
+    assert main.BG == "#f6f7f9"
+    assert main.SURFACE == "#ffffff"
     assert main.ICON_BLUE == main.ACCENT
     assert contrast(main.CARD, main.ACCENT) >= 4.5
     assert contrast(main.TEXT, main.BG) >= 7
     assert contrast(main.MUTED, main.SURFACE) >= 4.5
+    assert contrast(main.SURFACE, main.PRIMARY) >= 4.5
+    assert contrast(main.DANGER, main.CARD) >= 4.5
+    assert contrast(main.WARNING, main.WARNING_SOFT) >= 4.5
+    for background, foreground in main.REFERENCE_TAGS.values():
+        assert contrast(background, foreground) >= 4.5
     source = inspect.getsource(main)
     for obsolete_tint in ("#f8fcfb", "#fbfdfd", "#edf5f3", "#167d78"):
         assert obsolete_tint not in source
@@ -1073,7 +1154,7 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     assert "_drugs_in_class" in detail_page_source
     assert "command=self.back_to_major_groups" in detail_page_source
     assert 'text="+"' in detail_page_source
-    assert "add_drug_tooltip" in detail_page_source
+    assert "_attach_class_tooltip" not in detail_page_source
     assert "toggle_detail_drug_creator" in detail_page_source
     assert "save_detail_class_medicine" in detail_page_source
     assert 'image=_edit_icon(20)' in detail_row_source
@@ -1107,7 +1188,7 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     assert 'text="+"' in detail_row_source
     assert 'I.t("favorite_use_rx")' not in detail_row_source
     assert "self.add_drug_database_item(item)" in detail_row_source
-    assert 'self._attach_class_tooltip(add_button, I.t("add_drug"))' in detail_row_source
+    assert '_attach_class_tooltip' not in detail_row_source
     assert "class_name_filter_var" not in form_source
     assert "class_name_filter_menu" not in form_source
     assert "class_starred_filter_var" not in form_source
@@ -1130,7 +1211,7 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     assert "dropdown_font=mapping_control_font" in mapping_source
     assert "mapping_actions" in mapping_source
     assert 'side="left", fill="x", expand=True' in mapping_source
-    assert "right = ctk.CTkFrame" in mapping_source
+    assert "right = GlassFrame" in mapping_source
     assert "right = ctk.CTkScrollableFrame" not in mapping_source
     assert 'text=I.t("mapping_selected_medicine")' not in mapping_source
     assert 'pady=(10, 8)' in mapping_source
@@ -1356,10 +1437,10 @@ def test_patient_page_has_compact_two_column_layout_and_expandable_history():
     assert "patient_meta" not in form_source
     assert "patient_export" not in form_source
     assert "prescriptions_panel.grid(row=0, column=1" in form_source
-    assert "patient_action_new" in form_source
-    assert "patient_action_save" in form_source
+    assert "command=self.new_patient" in form_source
+    assert "command=self.save_patient_history" in form_source
     assert "patient_action_clear" not in form_source
-    assert "patient_action_delete" in form_source
+    assert "command=self.delete_selected_patient" in form_source
     assert "patient_status_label" in form_source
     assert "_on_patient_form_change" in form_source
     assert 'bind("<Double-Button-1>", self.load_selected_patient)' in form_source
@@ -1390,7 +1471,8 @@ def test_quick_prescribe_autocomplete_uses_large_result_menu():
     source = inspect.getsource(App._render_quick_results)
     assert "height=min(10, len(results))" in source
     assert "fit_autocomplete_popup" in source
-    assert '("Segoe UI", 20)' in source
+    assert '("Segoe UI", 21)' in source
+    assert 'self._quick_search_bar, box, len(results), align_anchor=True' in source
     assert "after(6000, self._expire_quick_results)" in source
     assert "_quick_click_outside" in inspect.getsource(App._build_quick_prescribe)
 
@@ -1424,7 +1506,7 @@ def test_refined_typography_spacing_and_sidebar_selection():
     assert "font=BRAND_FONT" in row and "font=SCIENTIFIC_FONT" in row
     assert 'sticky="new", padx=CARD_GAP, pady=CARD_GAP' in inspect.getsource(App._render_favorite_card)
     assert "_selection_indicator" in inspect.getsource(App.show_page)
-    assert "fg_color=ACCENT_SOFT if name == key" in inspect.getsource(App.show_page)
+    assert "fg_color=NAV_ACTIVE_SOFT if name == key" in inspect.getsource(App.show_page)
     for method in (DrugRow._show_ac, App._show_favorite_autocomplete, App._render_quick_results):
         assert "fit_autocomplete_popup" in inspect.getsource(method)
 
@@ -1493,43 +1575,31 @@ def test_starred_cards_are_single_line_two_column_with_plus_actions():
     assert label.text.endswith("…") and Font().measure(label.text) <= 60
 
 
-def test_tooltip_hover_is_debounced_and_ignores_internal_leave_events():
-    from types import SimpleNamespace
+def test_tooltips_removed_globally_and_settings_footer_has_bottom_spacing():
     import inspect
     from main import App, SettingsWindow
 
-    jobs, delays = {}, []
-    def after(delay, callback):
-        key = str(len(delays))
-        jobs[key] = callback
-        delays.append(delay)
-        return key
-    ui = SimpleNamespace(after=after, after_cancel=lambda key: jobs.pop(key, None),
-                         winfo_pointerxy=lambda: (50, 50), inside=True)
-    ui._point_inside_widget = lambda widget, x, y: ui.inside
-    ui._cancel_tooltip_job = lambda name: App._cancel_tooltip_job(ui, name)
-    ui._hide_class_tooltip = lambda: App._hide_class_tooltip(ui)
-    ui._show_class_tooltip = lambda widget, text: None
-    ui._check_tooltip_leave = lambda widget: App._check_tooltip_leave(ui, widget)
-    owner = object()
-    App._schedule_class_tooltip(ui, owner, "Delete")
-    first_job = ui._tooltip_show_job
-    App._schedule_class_tooltip(ui, owner, "Delete")
-    assert ui._tooltip_show_job == first_job and delays == [400]
-    App._schedule_tooltip_leave(ui, owner)
-    jobs.pop(ui._tooltip_leave_job)()
-    assert ui._tooltip_owner is owner and first_job in jobs
-    ui.inside = False
-    App._schedule_tooltip_leave(ui, owner)
-    jobs.pop(ui._tooltip_leave_job)()
-    assert ui._tooltip_owner is None and not jobs
-    source = inspect.getsource(App._show_class_tooltip)
-    assert source.index("tip.withdraw()") < source.index("tip.deiconify()")
-    assert "widget.winfo_height() + 8" in source
+    source = inspect.getsource(App)
+    for removed in ("_attach_class_tooltip", "_show_class_tooltip", "_tooltip_show_job",
+                    "_schedule_tooltip_leave", "_hide_class_tooltip"):
+        assert removed not in source
     footer = inspect.getsource(SettingsWindow._build_footer)
+    assert 'pady=(10, 32)' in footer and 'footer.pack_propagate(False)' in footer
+    assert 'I.t("settings_categories")' not in inspect.getsource(SettingsWindow._build_workspace)
     assert 'I.t("settings_cancel")' not in footer
     assert "self.restore_defaults" in footer and "self.reset_all_settings" in footer
     assert 'self.protocol("WM_DELETE_WINDOW", self.cancel)' in inspect.getsource(SettingsWindow.__init__)
+
+
+def test_quick_autocomplete_keeps_anchor_alignment_near_screen_edge():
+    from main import autocomplete_layout
+    width, height, x, y, rows = autocomplete_layout(
+        (1350, 100, 400, 36), (0, 0, 1920, 1080), 1200, 32, 2, align_anchor=True)
+    assert x == 1350 and width == 560
+    assert x + width <= 1910 and rows == 2
+    width, height, x, y, rows = autocomplete_layout(
+        (300, 100, 800, 36), (0, 0, 1920, 1080), 600, 32, 2, align_anchor=True)
+    assert x == 300 and width == 800
 
 
 def test_quantity_calculator_accepts_compact_clinical_inputs():
@@ -1928,6 +1998,117 @@ assert "Warfarin" in query and "Patient" not in query and "RX-" not in query
     run_isolated(tmp_path, code)
 
 
+def test_openfda_five_sections_keep_label_context_and_missing_values():
+    import json
+    import openfda
+    record = {
+        "indications_and_usage": ["1 INDICATIONS AND USAGE Example label use."],
+        "dosage_and_administration": ["2 DOSAGE AND ADMINISTRATION Initial dose. "
+            "2.2 Renal Impairment Reduce the dose for renal impairment. "
+            "Follow the stated dosing schedule. 2.3 Hepatic Impairment Different advice."],
+        "use_in_specific_populations": ["8.1 Pregnancy Label pregnancy advice. "
+            "8.6 Renal Impairment No adjustment for mild renal impairment. "
+            "8.7 Hepatic Impairment Other advice."],
+    }
+    class Response:
+        def read(self):
+            return json.dumps({"results": [record]}).encode()
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    result = openfda.lookup_label("Example", lambda request, timeout: Response())
+    assert result.indications == tuple(record["indications_and_usage"])
+    assert result.dosage == tuple(record["dosage_and_administration"])
+    assert len(result.renal_adjustment) == 2
+    assert "Follow the stated dosing schedule." in result.renal_adjustment[0]
+    assert all("Hepatic" not in section for section in result.renal_adjustment)
+    assert result.pregnancy == ("8.1 Pregnancy Label pregnancy advice.",)
+    assert result.contraindications == ()
+    assert result.source_url.startswith(openfda.API_URL)
+    assert openfda._topic_excerpts({"dosage_and_administration": ["Usual dose only."]},
+        ("dosage_and_administration",), r"\brenal\b") == ()
+    assert openfda._topic_excerpts({"dosage_and_administration": [
+        "Creatinine clearance below threshold. Reduce the dose as directed."]},
+        ("dosage_and_administration",), r"creatinine\s+clearance") == (
+            "Creatinine clearance below threshold. Reduce the dose as directed.",)
+
+
+def test_openfda_reference_cards_have_five_ordered_distinct_colors():
+    import inspect
+    from main import App, REFERENCE_TAGS
+    assert list(REFERENCE_TAGS) == ["indication", "dose", "contraindication", "pregnancy", "renal"]
+    assert len(set(REFERENCE_TAGS.values())) == 5
+    source = inspect.getsource(App._show_openfda_results)
+    titles = ["label_indication", "label_dose", "label_contraindications", "label_pregnancy", "label_renal_adjustment"]
+    assert [source.index(title) for title in titles] == sorted(source.index(title) for title in titles)
+    assert "label_interactions" not in source
+    assert 'I.t("reference_source")' not in source
+    assert "reference_expand" in inspect.getsource(App._reference_line)
+
+
+def test_openfda_extended_label_metadata_is_explicit_and_cache_safe(monkeypatch):
+    import datetime
+    import openfda
+    import config as cfg
+    from types import SimpleNamespace
+    from main import App
+    reference = openfda.LabelReference(
+        medicine="Example", scientific_name="Example", label_name="EXAMPLE",
+        dosage=("Adults take 10 mg. Maximum 20 mg.",),
+        adult_dose=("Adults take 10 mg.",), maximum_dose=("Maximum 20 mg.",),
+        route=("ORAL",), hepatic_adjustment=("Reduce for hepatic impairment.",),
+        renal_adjustment=("Monitor renal function.",), renal_status="precaution_only",
+        effective_date="20260301", field_sources=(("dose", ("Dosage And Administration",)),),
+        full_sections=(("Dosage And Administration", ("Adults take 10 mg.",)),),
+        source_url="https://api.fda.gov/example")
+    restored = openfda.reference_from_dict(openfda.reference_to_dict(reference))
+    assert restored == reference
+    assert openfda._renal_status(()) == "not_found"
+    assert openfda._renal_status(("Monitor renal function.",)) == "precaution_only"
+    assert openfda._renal_status(("Reduce dose in renal impairment.",)) == "dose_stated"
+    stored = {}
+    monkeypatch.setattr(cfg.config, "get", lambda key, default=None: stored.get(key, default))
+    monkeypatch.setattr(cfg.config, "set", lambda key, value: stored.__setitem__(key, value))
+    calls = []
+    monkeypatch.setattr(openfda, "lookup_labels", lambda names: calls.append(list(names)) or [reference])
+    ui = SimpleNamespace(_openfda_cache_key=lambda medicine:
+                         App._openfda_cache_key(medicine))
+    first, cached, checked = App._lookup_openfda_with_cache(ui, ["Example"])
+    assert first == [reference] and not cached and calls == [["Example"]]
+    second, cached, checked = App._lookup_openfda_with_cache(ui, ["Example"])
+    assert second == [reference] and cached == {"example"} and len(calls) == 1
+    third, cached, checked = App._lookup_openfda_with_cache(ui, ["Example"], force=True)
+    assert third == [reference] and not cached and len(calls) == 2
+    monkeypatch.setattr(openfda, "lookup_labels", lambda names: [])
+    empty, cached, checked = App._lookup_openfda_with_cache(ui, ["Example"], force=True)
+    assert empty == [] and "example" not in stored["openfda_cache"]
+
+
+def test_online_reference_remaining_improvements_exclude_declined_features():
+    import inspect
+    from main import App
+    build = inspect.getsource(App.build_forms)
+    render = inspect.getsource(App._show_openfda_results)
+    full = inspect.getsource(App.open_full_drug_label)
+    assert "reference_search_entry" in build and "lookup_openfda_search" in build
+    assert "reference_refresh_button" in build and "clear_openfda_cache" in build
+    assert "reference_label_date" in render and "reference_section_source" in inspect.getsource(App._reference_line)
+    assert "reference_renal_" in render and "open_full_drug_label" in render
+    assert 'widget.search(query' in full and 'tag_add("match"' in full
+    assert 'font=("Segoe UI", 24, "bold")' in full
+    for section in ("pediatric use", "how supplied", "warnings and cautions",
+                    "use in specific populations", "clinical studies", "clinical pharmacology"):
+        assert section in full
+    assert 'I.t("reference_excerpt_note")' not in render
+    assert 'header_text' in render
+    layout = inspect.getsource(App._layout_reference_sections)
+    assert 'panel.pack(in_=parent._reference_stacks[index % columns]' in layout
+    assert 'panel.lift()' in layout
+    assert 'I.t("page_reference_help")' not in build
+    combined = build + render + full + inspect.getsource(App._dose_reference_values)
+    for declined in ("pediatric dose", "patient-context", "comparison mode", "copy and export"):
+        assert declined not in combined.casefold()
+
+
 def test_openfda_no_match_returns_none(tmp_path):
     code = '''
 import json
@@ -2041,3 +2222,102 @@ assert database.search_trade("forx")[0].generic_name == "Dapagliflozin"
     assert "180" in inspect.getsource(DrugRow._schedule_autocomplete)
     assert "_append_detail_medicine_page" in inspect.getsource(App.show_detail_medicines_page)
     assert "_favorite_render_limit" in inspect.getsource(App.refresh_favorites_page)
+
+
+def test_glass_theme_cached_texture_and_widget_lifecycle(tmp_path):
+    run_isolated(tmp_path, '''
+import tkinter as tk
+import customtkinter as ctk
+from main import GlassFrame, glass_texture, SURFACE, DrugRow
+
+assert glass_texture("workspace") is glass_texture("workspace")
+assert glass_texture("workspace").size == (96, 96)
+assert min(glass_texture("panel").getpixel((0, 0))) > 220
+assert issubclass(DrugRow, GlassFrame)
+assert ctk.ThemeManager.theme["CTkEntry"]["fg_color"] == [SURFACE, SURFACE]
+root = ctk.CTk()
+root.withdraw()
+errors = []
+root.report_callback_exception = lambda kind, value, trace: errors.append(str(value))
+frame = GlassFrame(root, width=320, height=180, corner_radius=12, border_width=1)
+frame.pack()
+root.update_idletasks()
+frame._paint_glass(force=True)
+assert frame._glass_photo is not None
+assert len(frame._canvas.find_withtag("glass_surface")) == 1
+photo = frame._glass_photo
+frame._paint_glass(force=True)
+assert frame._glass_photo is photo
+matching = GlassFrame(root, width=320, height=180, corner_radius=12, border_width=1)
+matching._glass_region = frame._glass_region
+matching._paint_glass(force=True)
+assert matching._glass_photo is photo
+matching.destroy()
+frame.pack_forget()
+frame.configure(width=480, height=240)
+event = tk.Event()
+event.width = round(frame._apply_widget_scaling(480))
+event.height = round(frame._apply_widget_scaling(240))
+frame._update_dimensions_event(event)
+frame._paint_glass(force=True)
+assert frame._glass_photo is not photo
+assert len(frame._canvas.find_withtag("glass_surface")) == 1
+frame.destroy()
+root.after(150, root.quit)
+root.mainloop()
+assert not errors, errors
+root.destroy()
+''')
+
+
+def test_glass_shared_backdrop_selection_and_visible_render_policy(tmp_path):
+    run_isolated(tmp_path, '''
+import tkinter as tk
+import customtkinter as ctk
+from main import GlassFrame, glass_panel_image, ACCENT_SOFT
+size = (240, 120, 12, 1)
+left = glass_panel_image(size, "panel", (0, 0, .3, .3))
+right = glass_panel_image(size, "panel", (.7, .7, 1, 1))
+assert left.tobytes() != right.tobytes()
+assert left.getpixel((0, 0))[3] == 0
+assert left.getpixel((120, 60))[3] == 255
+selected = glass_panel_image(size, "panel", (0, 0, .3, .3), ACCENT_SOFT)
+assert selected.tobytes() != left.tobytes()
+root = ctk.CTk()
+root.withdraw()
+panel = GlassFrame(root)
+panel._paint_glass()
+assert panel._glass_photo is None
+panel._paint_glass(force=True)
+assert panel._glass_photo is not None
+panel._release_glass()
+assert panel._glass_photo is None
+assert not panel._canvas.find_withtag("glass_surface")
+panel.destroy()
+panel._queue_glass()  # no callback can be queued on a deleted widget
+root.destroy()
+''')
+
+
+def test_glass_white_reflections_are_gradients_and_keep_readable_contrast():
+    import main
+
+    def luminance(rgb):
+        values = [channel / 255 for channel in rgb[:3]]
+        return sum((value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4)
+                   * weight for value, weight in zip(values, (.2126, .7152, .0722)))
+
+    reflection = main.glass_reflection()
+    assert reflection is main.glass_reflection()
+    assert reflection.getextrema()[0] < reflection.getextrema()[1]
+    for surface in ("panel", "sidebar"):
+        for region in ((0, 0, .3, .3), (.7, .7, 1, 1), (0, 0, 1, 1)):
+            image = main.glass_panel_image((240, 160, 12, 1), surface, region)
+            assert image.getpixel((120, 130)) != image.getpixel((120, 70))
+            for x in range(12, 228, 12):
+                for y in range(12, 148, 12):
+                    background = luminance(image.getpixel((x, y)))
+                    for color in (main.TEXT, main.MUTED, main.ACCENT):
+                        foreground = luminance(tuple(bytes.fromhex(color[1:])))
+                        light, dark = sorted((foreground, background), reverse=True)
+                        assert (light + .05) / (dark + .05) >= 4.5

@@ -67,6 +67,7 @@ def _default_config() -> Dict[str, Any]:
         "gemini_enabled": False,
         "gemini_api_key": "",
         "gemini_last_test": "",
+        "openfda_cache": {},
         "document_defaults": {
             "language": "interface", "show_header": True,
             "logo_size": "medium", "margin_mm": 16,
@@ -109,6 +110,7 @@ class Config:
         self.data.setdefault("gemini_enabled", False)
         self.data.setdefault("gemini_api_key", "")
         self.data.setdefault("gemini_last_test", "")
+        self.data.setdefault("openfda_cache", {})
         self.data.setdefault("document_defaults", {
             "language": "interface", "show_header": True,
             "logo_size": "medium", "margin_mm": 16,

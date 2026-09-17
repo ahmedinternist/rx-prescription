@@ -51,3 +51,4 @@ data/*.xlsx
 data/*.xls
 
 .test-tmp/
+.firecrawl/
