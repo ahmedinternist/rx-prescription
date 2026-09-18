@@ -10,8 +10,11 @@ from pathlib import Path
 def run_isolated(tmp_path: Path, code: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["RX_APP_DATA_DIR"] = str(tmp_path)
-    return subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).parent,
-                          env=env, text=True, capture_output=True, check=True)
+    try:
+        return subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).parent,
+                              env=env, text=True, capture_output=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise AssertionError(exc.stderr or exc.stdout) from exc
 
 
 def test_signed_qr_round_trip_and_validation(tmp_path):
@@ -593,7 +596,7 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
     assert "treatment_variant_var" not in page_source
     assert "treatment_disease_entry" not in page_source
     assert "treatment_local_note" not in page_source
-    assert "CTkComboBox" in page_source
+    assert "VisualComboBox" in page_source
     assert "_filter_treatment_template_menu" in page_source
     assert "_show_treatment_template_suggestions(matches)" in template_search_source
     assert "Toplevel" in template_popup_source
@@ -604,7 +607,7 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
     assert "max(540" in template_popup_source
     assert "min(len(matches), 7)" in template_popup_source
     assert "height=46" in template_popup_source
-    assert "size=18" in template_popup_source
+    assert "dropdown_font(_ui_font(18))" in template_popup_source
     assert "load_treatment_template" in template_choice_source
     assert "treatment_template_selector_var" in current_disease_source
     assert "duplicate_treatment_template" not in page_source
@@ -636,7 +639,7 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
     assert '("frequency", I.t("frequency"), FREQUENCY_OPTIONS)' in render_source
     assert '("duration", I.t("duration"), None)' in render_source
     assert '("notes", I.t("notes"), NOTE_OPTIONS)' in render_source
-    assert "CTkComboBox" in render_source
+    assert "VisualComboBox" in render_source
     assert "DirectionalTextBinding" in render_source
     assert "_show_treatment_apply_preview" in use_source
     assert "CTkRadioButton" in preview_source
@@ -873,7 +876,7 @@ def test_visual_layout_constants_are_compact_and_consistent():
     assert SELECTED_MEDICINE_FONT_SIZE == 35
     assert DASHBOARD_WIDTH < 210
     assert 'pady=(0, 3)' in inspect.getsource(App.page_header)
-    assert 'pady=(4, 6)' in inspect.getsource(SettingsWindow._new_page)
+    assert 'pady=(8, 12)' in inspect.getsource(SettingsWindow._new_page)
 
 
 def test_dashboard_density_preserves_navigation_without_tooltips(monkeypatch):
@@ -1034,21 +1037,22 @@ def test_medication_cards_use_compact_header_actions_without_duplicate_or_hints(
     assert "duplicate" not in row_source
     assert "header_actions" in row_source
     assert "self.drag_handle" in row_source
-    assert 'text="⠿"' in row_source
+    assert 'text="↑"' in row_source and 'text="↓"' in row_source
+    assert "self.drag_handle = self.number_badge" in row_source
     assert 'header_actions, text="🗑"' in row_source
     assert 'header_actions, text=I.t("delete")' not in row_source
     assert 'name_row, text=I.t("drug")' not in row_source
     assert 'science_input_row, textvariable=self.name_var' in row_source
     assert 'science_input_row, text="!"' in row_source
     assert 'names, text="1."' in row_source
-    assert 'self.number_badge.grid(row=0, column=0, sticky="s"' in row_source
-    assert 'header_actions.grid(row=0, column=3, sticky="s"' in row_source
+    assert 'self.number_badge.grid(row=0, column=0, sticky="n"' in row_source
+    assert 'header_actions.grid(row=0, column=3, sticky="n"' in row_source
     assert 'self.number_badge.configure(text=f"{number}.")' in row_source
     assert 'medication_toolbar, text=I.t("save_patient_prescription")' in form_source
     assert 'CTkButton(self.pages["medications"], text=I.t("save_patient_prescription")' not in form_source
     assert "self.up_button" not in row_source
     assert "self.down_button" not in row_source
-    assert "tk.Menu" in row_source
+    assert "VisualMenu" in row_source
     assert "I.t('move_up')" in row_source
     assert "I.t('move_down')" in row_source
     assert 'font=("Segoe UI", 16, "bold")' in row_source
@@ -1349,7 +1353,7 @@ def test_prescriber_specialty_uses_editable_localized_selector():
     selector_source = inspect.getsource(App.specialty_field)
     assert "self.specialty_field(" in form_source
     assert 'I.t("specialty")' in form_source
-    assert "CTkComboBox" in selector_source
+    assert "VisualComboBox" in selector_source
     assert "variable=binding.display_var" in selector_source
     assert 'bind("<KeyRelease>", self._filter_specialties)' in selector_source
 
@@ -1473,6 +1477,9 @@ def test_quick_prescribe_autocomplete_uses_large_result_menu():
     assert "fit_autocomplete_popup" in source
     assert '("Segoe UI", 21)' in source
     assert 'self._quick_search_bar, box, len(results), align_anchor=True' in source
+    assert 'measure_content=True' in source
+    assert 'width_multiplier=2' in source
+    assert 'cap_width=False' in source
     assert "after(6000, self._expire_quick_results)" in source
     assert "_quick_click_outside" in inspect.getsource(App._build_quick_prescribe)
 
@@ -1584,7 +1591,7 @@ def test_tooltips_removed_globally_and_settings_footer_has_bottom_spacing():
                     "_schedule_tooltip_leave", "_hide_class_tooltip"):
         assert removed not in source
     footer = inspect.getsource(SettingsWindow._build_footer)
-    assert 'pady=(10, 32)' in footer and 'footer.pack_propagate(False)' in footer
+    assert 'pady=(10, 16)' in footer and 'height=66' in footer and 'footer.pack_propagate(False)' in footer
     assert 'I.t("settings_categories")' not in inspect.getsource(SettingsWindow._build_workspace)
     assert 'I.t("settings_cancel")' not in footer
     assert "self.restore_defaults" in footer and "self.reset_all_settings" in footer
@@ -2297,6 +2304,401 @@ panel.destroy()
 panel._queue_glass()  # no callback can be queued on a deleted widget
 root.destroy()
 ''')
+
+
+def test_approved_light_glass_controls_and_reorder_callbacks(tmp_path):
+    run_isolated(tmp_path, '''
+import customtkinter as ctk
+from main import App, SettingsWindow, SURFACE, LINE, glass_panel_image
+from PIL import Image
+import i18n as I
+
+app = App()
+app.withdraw()
+app.show_page("medications")
+first = app.rows[0]
+second = app.add_row()
+second.trade_var.set("Brand only")
+second.move_up_button.invoke()
+assert app.rows[0] is second
+assert second.number_badge.cget("text") == "1."
+second.move_down_button.invoke()
+assert app.rows[1] is second
+assert second.number_badge.cget("text") == "2."
+for row in app.rows:
+    assert row.freq_entry.cget("fg_color") == SURFACE
+    assert row.notes_entry.cget("fg_color") == SURFACE
+    assert row.freq_entry.cget("border_color") == LINE
+assert app.medication_favorites_button.cget("fg_color") == SURFACE
+assert app.word_preview_toggle.cget("fg_color") == SURFACE
+assert app.quick_prescribe_var.get() == ""
+assert app.quick_prescribe_entry._search_hint.winfo_manager() == "place"
+app.quick_prescribe_var.set("Brand")
+assert not app.quick_prescribe_entry._search_hint.winfo_manager()
+app.quick_prescribe_var.set("")
+settings = SettingsWindow(app)
+settings.withdraw()
+settings._show_section("clinic")
+assert settings.content_host._glass_surface == "sheet"
+assert settings.logo_entry.grid_info()["column"] == 1
+assert settings.logo_thumbnail.grid_info()["column"] == 0
+assert settings.settings_search_entry._search_hint.winfo_manager() == "place"
+settings.settings_search_var.set("clinic")
+assert not settings.settings_search_entry._search_hint.winfo_manager()
+settings.document_header_var.set(False)
+logo_path = str(__import__("config").APP_DIR / "test-logo.png")
+Image.new("RGB", (30, 30), "red").save(logo_path)
+settings.logo_var.set(logo_path)
+assert settings.logo_thumbnail.cget("text") == ""
+settings.logo_var.set("")
+assert settings.logo_thumbnail.cget("text") == "Rx"
+assert settings.clinic_preview_logo.cget("text") == "—"
+sheet = glass_panel_image((200, 100, 12, 1), "sheet")
+assert min(sheet.getpixel((100, 50))[:3]) > 245
+settings.destroy()
+app._executor.shutdown(wait=False, cancel_futures=True)
+app.destroy()
+''')
+
+
+def test_visual_polish_focus_icons_and_toolbars(tmp_path):
+    run_isolated(tmp_path, '''
+from main import App, VisualButton, VisualEntry, VisualComboBox, action_icon, LINE, ACCENT, DANGER, FIELD_HEIGHT, LABEL_FONT
+app = App()
+app.withdraw()
+app.show_page("medications")
+row = app.rows[0]
+assert LABEL_FONT[1] == 12
+for field in (row.trade_entry, row.name_entry, row.dosage_entry, row.freq_entry, row.notes_entry):
+    assert isinstance(field, (VisualEntry, VisualComboBox))
+    before = (field.cget("width"), field.cget("height"), field.cget("border_width"))
+    field._field_focused()
+    assert field.cget("border_color") == ACCENT
+    field._field_blurred()
+    assert field.cget("border_color") == LINE
+    assert before == (field.cget("width"), field.cget("height"), field.cget("border_width"))
+row.dosage_entry._field_focused()
+row.dosage_entry.configure(border_color=DANGER)
+row.dosage_entry._field_blurred()
+assert row.dosage_entry.cget("border_color") == DANGER
+app.deiconify()
+app.update()
+row.trade_entry._entry.event_generate("<FocusIn>")
+assert row.trade_entry.cget("border_color") == ACCENT
+row.trade_entry._entry.event_generate("<FocusOut>")
+assert row.trade_entry.cget("border_color") == LINE
+assert row.move_up_button.cget("text") == "↑"
+assert row.move_up_button.cget("image") is action_icon("↑", ACCENT)
+calls = []
+star = VisualButton(app, text="☆", text_color=ACCENT, command=lambda: calls.append(True))
+star.configure(text="★")
+assert star.cget("text") == "★"
+assert star.cget("image") is action_icon("★", ACCENT)
+star.invoke()
+assert calls == [True]
+assert app.favorite_sort_menu.cget("height") == FIELD_HEIGHT
+assert app.treatment_template_selector.cget("height") == FIELD_HEIGHT
+assert app.action.cget("border_width") == 0
+assert app.action._glass_surface == "sheet"
+app._executor.shutdown(wait=False, cancel_futures=True)
+app.destroy()
+''')
+
+
+def test_word_exports_use_only_a5_a4_and_selected_page_dimensions(tmp_path):
+    run_isolated(tmp_path, '''
+from pathlib import Path
+from docx import Document
+from docx.oxml.ns import qn
+import config as cfg
+import pdf_generator as pdf
+from main import App
+
+assert set(cfg.PAPER_SIZES) == {"A5", "A4"}
+assert set(pdf.PAGE_MAP) == {"A5", "A4"}
+assert abs(cfg.PAPER_SIZES["A5"][0] * 25.4 / 72 - 148) < .001
+assert abs(cfg.PAPER_SIZES["A5"][1] * 25.4 / 72 - 210) < .001
+assert abs(cfg.PAPER_SIZES["A4"][0] * 25.4 / 72 - 210) < .001
+assert abs(cfg.PAPER_SIZES["A4"][1] * 25.4 / 72 - 297) < .001
+cfg.config.data["paper_size"] = "Letter"
+cfg.config.save()
+loaded = cfg.Config()
+assert loaded.paper_size == cfg.DEFAULT_PAPER
+try:
+    loaded.paper_size = "Letter"
+    raise AssertionError("Letter must not be accepted")
+except ValueError:
+    pass
+app = App()
+app.withdraw()
+rx = app.collect()
+root = cfg.APP_DIR
+for paper in ("A5", "A4"):
+    for mode in ("header", "no-header", "medications"):
+        path = root / (paper + "-" + mode + ".docx")
+        if mode == "medications":
+            pdf.generate_medication_label_docx(rx, path, paper_size=paper)
+        else:
+            pdf.generate_prescription_docx(rx, path, paper_size=paper, show_header=mode == "header")
+        for section in Document(path).sections:
+            width, height = cfg.PAPER_SIZES[paper]
+            assert abs(section.page_width.pt - width) < .06
+            assert abs(section.page_height.pt - height) < .06
+            assert section._sectPr.pgSz.get(qn("w:code")) is None
+captured = []
+original = pdf.generate_prescription_docx
+pdf.generate_prescription_docx = lambda *args, **kwargs: captured.append(kwargs)
+app._generate_full_document(rx, None, {"_paper_size": "A5"}, path_docx=str(root / "capture.docx"))
+assert captured[0]["paper_size"] == "A5"
+pdf.generate_prescription_docx = original
+app._executor.shutdown(wait=False, cancel_futures=True)
+app.destroy()
+''')
+
+
+def test_ui_font_settings_apply_save_restore_and_preserve_inputs(tmp_path):
+    run_isolated(tmp_path, '''
+import tkinter.font as tkfont
+from unittest.mock import patch
+import config as cfg
+import i18n as I
+from main import App, SettingsWindow, PopupListbox, VisualOptionMenu, VisualMenu, FIELD_HEIGHT, _ui_font
+app = App()
+app.withdraw()
+app.patient_vars["name"].set("أحمد علي")
+app.rows[0].trade_var.set("Brand remains")
+settings = SettingsWindow(app)
+settings.withdraw()
+assert settings.dropdown_font_var.get() == I.t("settings_font_default")
+settings.dropdown_font_var.set("28")
+settings.patient_font_var.set("24")
+settings.paper_var.set("A5")
+with patch("main.messagebox.showinfo"):
+    settings.save()
+assert app.paper_var.get() == "A5"
+assert cfg.Config().paper_size == "A5"
+assert cfg.Config().ui_font_size("dropdown_font_size") == 28
+assert cfg.Config().ui_font_size("patient_name_font_size") == 24
+assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 28
+assert app.favorite_sort_menu.cget("dropdown_font").cget("size") == 28
+assert app.patient_name_entry.cget("font").cget("size") == 24
+assert app.patient_vars["name"].get() == "أحمد علي"
+assert app.rows[0].trade_var.get() == "Brand remains"
+popup = PopupListbox(app, font=("Segoe UI", 30))
+assert popup.cget("font") == str(_ui_font(28))
+menu = VisualMenu(app, font=("Segoe UI", 44))
+assert tkfont.Font(root=app, font=menu.cget("font")).actual() == tkfont.Font(root=app, font=str(_ui_font(28))).actual()
+fresh_row = app.add_row()
+assert fresh_row.notes_entry.cget("dropdown_font").cget("size") == 28
+cfg.config.set_ui_font_sizes(0, 14)
+app.apply_ui_font_preferences()
+assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 16
+assert tkfont.Font(root=app, font=popup.cget("font")).cget("size") == 30
+assert app.patient_name_entry.cget("height") == FIELD_HEIGHT
+assert int(app.quick_prescribe_entry.pack_info()["pady"]) == round(4 * app.quick_prescribe_entry._get_widget_scaling())
+assert app.quick_prescribe_entry.master.winfo_children()[0].cget("image") is not None
+settings = SettingsWindow(app)
+settings.withdraw()
+settings.dropdown_font_var.set("32")
+settings.patient_font_var.set("30")
+with patch("main.messagebox.askyesno", return_value=True):
+    settings.restore_defaults()
+assert settings.dropdown_font_var.get() == I.t("settings_font_default")
+assert settings.patient_font_var.get() == "14"
+settings.destroy()
+cfg.config.data["ui_fonts"] = {"dropdown_font_size": "bad", "patient_name_font_size": 100}
+assert cfg.config.ui_font_size("dropdown_font_size") == 0
+assert cfg.config.ui_font_size("patient_name_font_size") == 14
+app._executor.shutdown(wait=False, cancel_futures=True)
+app.destroy()
+''')
+
+
+def test_settings_menus_stay_fixed_with_maximum_display_fonts(tmp_path):
+    run_isolated(tmp_path, '''
+import config as cfg
+import tkinter.font as tkfont
+from main import App, SettingsWindow, VisualOptionMenu, VisualComboBox, PopupListbox, VisualMenu
+cfg.config.set_ui_font_sizes(56, 56)
+assert cfg.Config().ui_font_size("dropdown_font_size") == 56
+assert cfg.Config().ui_font_size("patient_name_font_size") == 56
+for invalid in (9, 57):
+    try:
+        cfg.config.set_ui_font_sizes(invalid, 14)
+        raise AssertionError("Out-of-range sizes must be rejected")
+    except ValueError:
+        pass
+app = App()
+app.withdraw()
+assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 56
+assert app.patient_name_entry.cget("font").cget("size") == 56
+assert app.patient_name_entry.cget("height") == 68
+settings = SettingsWindow(app)
+settings.withdraw()
+menus = []
+pending = [settings]
+while pending:
+    widget = pending.pop()
+    if isinstance(widget, (VisualOptionMenu, VisualComboBox)):
+        menus.append(widget)
+        assert widget.cget("dropdown_font") is widget._dropdown_font_baseline
+    pending.extend(widget.winfo_children())
+assert len(menus) >= 5
+size_menus = [widget for widget in menus if "56" in widget.cget("values")]
+assert len(size_menus) == 2
+assert all(widget.cget("dropdown_font").cget("size") == 13 for widget in size_menus)
+app.apply_ui_font_preferences()
+assert all(widget.cget("dropdown_font") is widget._dropdown_font_baseline for widget in menus)
+native = PopupListbox(settings, font=("Segoe UI", 16))
+assert native.cget("font") == "{Segoe UI} 16"
+context = VisualMenu(settings, font=("Segoe UI", 16))
+assert tkfont.Font(root=app, font=context.cget("font")).actual() == tkfont.Font(root=app, font=("Segoe UI", 16)).actual()
+assert settings._settings_footer.cget("height") == 66
+settings.destroy()
+settings = SettingsWindow(app)
+settings.withdraw()
+assert settings.dropdown_font_var.get() == "56"
+assert app.favorite_sort_menu.cget("dropdown_font").cget("size") == 56
+settings.destroy()
+app._executor.shutdown(wait=False, cancel_futures=True)
+app.destroy()
+''')
+
+
+def test_content_width_popup_and_class_add_icon_are_usable(tmp_path):
+    run_isolated(tmp_path, '''
+import tkinter as tk
+import tkinter.font as tkfont
+from main import App, PopupListbox, fit_autocomplete_popup, VisualButton, ACCENT, SURFACE
+app = App()
+app.geometry("1000x760+20+20")
+app.update()
+top = tk.Toplevel(app)
+top.overrideredirect(True)
+box = PopupListbox(top, width=8, font=("Segoe UI", 16))
+item = "Longer brand and scientific name, dose and duration"
+box.insert(tk.END, item)
+fit_autocomplete_popup(top, app._quick_search_bar, box, 1, align_anchor=True, measure_content=True)
+app.update()
+font = tkfont.Font(root=app, font=box.cget("font"))
+assert top.winfo_width() >= font.measure(item) + 36, (top.winfo_width(), font.measure(item), top.winfo_rootx(), top.winfo_screenwidth())
+assert top.winfo_rootx() == app._quick_search_bar.winfo_rootx()
+top.destroy()
+top = tk.Toplevel(app)
+top.overrideredirect(True)
+box = PopupListbox(top, width=8, font=("Segoe UI", 56))
+box.insert(tk.END, "Very long medicine label " * 12)
+fit_autocomplete_popup(top, app._quick_search_bar, box, 1, align_anchor=True, measure_content=True)
+app.update()
+assert box.cget("xscrollcommand")
+assert top.winfo_rootx() + top.winfo_width() <= top.winfo_screenwidth() - 10
+assert top.winfo_rooty() + top.winfo_height() <= top.winfo_screenheight() - 10
+assert any(isinstance(child, tk.Scrollbar) and child.cget("orient") == "horizontal"
+           for child in top.winfo_children())
+box.xview_moveto(1)
+app.update()
+assert box.xview()[0] > 0 and box.xview()[1] == 1
+top.destroy()
+app.show_detail_medicines_page("gastrointestinal", "PPI (Proton Pump Inhibitor)")
+plus = next(child for child in app._detail_page_bar.winfo_children()
+            if isinstance(child, VisualButton) and child.cget("text") == "+")
+assert plus.cget("fg_color") == SURFACE
+assert plus.cget("text_color") == ACCENT
+assert plus.cget("image") is not None
+assert not app.detail_drug_creator.winfo_manager()
+plus.invoke()
+assert app.detail_drug_creator.winfo_manager()
+app._executor.shutdown(wait=False, cancel_futures=True)
+app.destroy()
+''')
+
+
+def test_top_search_width_multiplier_doubles_only_requested_popup_width(tmp_path):
+    run_isolated(tmp_path, '''
+import tkinter as tk
+from main import PopupListbox, fit_autocomplete_popup
+root = tk.Tk()
+root.geometry("300x200+20+20")
+anchor = tk.Frame(root, width=160, height=36)
+anchor.place(x=10, y=20)
+root.update()
+widths = []
+for multiplier in (1, 2):
+    top = tk.Toplevel(root)
+    top.overrideredirect(True)
+    box = PopupListbox(top, width=8, font=("Segoe UI", 12))
+    box.insert(tk.END, "Result")
+    fit_autocomplete_popup(top, anchor, box, 1, align_anchor=True,
+                           measure_content=True, width_multiplier=multiplier)
+    root.update()
+    widths.append(top.winfo_width())
+    assert top.winfo_rootx() == anchor.winfo_rootx()
+    assert top.winfo_rootx() + top.winfo_width() <= top.winfo_screenwidth() - 10
+    assert int(box.cget("height")) == 1
+    top.destroy()
+assert widths == [160, 320], widths
+top = tk.Toplevel(root)
+top.overrideredirect(True)
+box = PopupListbox(top, width=300, font=("Segoe UI", 12))
+box.insert(tk.END, "Long result " * 40)
+fit_autocomplete_popup(top, anchor, box, 1, align_anchor=True,
+                       measure_content=True, width_multiplier=2)
+root.update()
+assert top.winfo_rootx() + top.winfo_width() <= top.winfo_screenwidth() - 10
+assert box.cget("xscrollcommand")
+root.destroy()
+''')
+
+
+def test_top_search_uncapped_width_preserves_anchor_and_vertical_bounds(tmp_path):
+    from main import autocomplete_layout
+
+    for screen in ((0, 0, 1366, 768), (-1920, 0, 1920, 1080)):
+        sx, sy, sw, sh = screen
+        anchor = (sx + sw - 180, sy + 100, 160, 36)
+        width, height, x, y, rows = autocomplete_layout(
+            anchor, screen, 2400, 49, 20, align_anchor=True, cap_width=False)
+        assert width == 2400 and x == anchor[0]
+        assert x + width > sx + sw
+        assert sy + 10 <= y and y + height <= sy + sh - 10
+        assert rows == 10
+    run_isolated(tmp_path, '''
+import tkinter as tk
+from main import PopupListbox, fit_autocomplete_popup
+root = tk.Tk()
+root.geometry("300x200+20+20")
+anchor = tk.Frame(root, width=160, height=36)
+anchor.place(x=10, y=20)
+root.update()
+top = tk.Toplevel(root)
+top.overrideredirect(True)
+box = PopupListbox(top, width=300, font=("Segoe UI", 12))
+for index in range(15):
+    box.insert(tk.END, "Drug class · Antidiarrheal " + str(index))
+expected = max(anchor.winfo_width(), box.winfo_reqwidth()) * 2
+fit_autocomplete_popup(top, anchor, box, 15, align_anchor=True,
+                       measure_content=True, width_multiplier=2, cap_width=False)
+root.update()
+assert top.winfo_width() == expected, (top.winfo_width(), expected)
+assert top.winfo_rootx() == anchor.winfo_rootx()
+assert top.winfo_rootx() + top.winfo_width() > top.winfo_screenwidth()
+assert box.winfo_width() > expected - 60
+assert box.cget("yscrollcommand")
+assert not box.cget("xscrollcommand")
+root.destroy()
+''')
+
+
+def test_popup_scrollbar_height_keeps_large_rows_on_screen():
+    from main import autocomplete_layout
+    for y in (50, 700):
+        width, height, x, popup_y, rows = autocomplete_layout(
+            (220, y, 600, 36), (0, 0, 1366, 768), 5000, 70, 30,
+            align_anchor=True, extra_height=22)
+        assert x == 220 and width == 1136
+        assert 10 <= popup_y and popup_y + height <= 758
+        assert popup_y >= y + 38 or popup_y + height <= y - 2
+        assert height == rows * 70 + 30
 
 
 def test_glass_white_reflections_are_gradients_and_keep_readable_contrast():

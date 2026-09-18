@@ -63,7 +63,7 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   remain consistent; warning/delete colors stay semantic. Glass is simulated
   with static, cached textures rather than Windows-only acrylic or real window
   transparency. Panels sample their position in a shared white/cool-gray backdrop,
-  with static inset shadows and restrained cool edge highlights.
+  with single hairline borders and restrained white top-edge highlights.
   White-gradient reflections add a top-edge glint and lower diffuse haze instead
   of solid panel fills; the shared backdrop has a matching soft white gradient.
   Favorites, templates, class panels, patient-history cards, reference cards and Settings use the
@@ -136,7 +136,16 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   highlighting additions, removals, and changes.
 - **Recovery centre** — deleted favorites, templates, patients, prescriptions,
   and class mappings can be restored for 30 days from Settings.
-- **Paper size**: A5 / A4 / Letter (whole layout adapts).
+- **Paper size**: A5 / A4. Both Word export variants explicitly embed the selected
+  page dimensions. Re-export older Word files to update their paper size; printer
+  driver settings can still override the document's paper choice.
+- **Display fonts**: Settings → General offers dropdown/autocomplete and patient-name
+  field font sizes from 10–56 px. Dropdown **Default** preserves each control's original
+  size. Settings menus always keep their normal size, independent of this preference.
+  These controls change the interface, not the prescription's export typography.
+  Top search results request twice the previous width and expand for their content,
+  while staying aligned with the search bar. Top search width is not capped at the
+  screen edge; other autocomplete menus retain their screen-aware width limits.
 - **Outputs**:
   - **Preview / Print** — full prescription PDF (prescriber, patient, drug
     table, QR).
@@ -192,6 +201,21 @@ Dashboard navigation uses matching 24 px blue line icons, a fixed icon/label gap
 and a pale-blue active-page highlight with a non-shifting indicator. Dashboard
 icons and the collapse control have no tooltips, including in collapsed mode.
 
+The approved light Clinical Glass layout uses white outlined Medication Entry
+actions and direct up/down arrows beside each medicine. Drag sorting remains
+available on its plain row number. Frequency and notes stay editable and use
+white fields. Settings groups gray cards on a softly graduated white canvas;
+Clinic Identity has three side-by-side contact fields, an inline logo thumbnail
+and a live header preview. Glass is simulated with cached static rendering,
+not desktop transparency. The current version remains 4.82.0.
+
+Visual polish keeps input heights compact while enlarging medication labels;
+cached, consistently sized action icons retain their existing commands and the
+supplied edit artwork. Neutral entry/dropdown borders turn blue while focused
+without resizing or hover motion. Favorites and Template search toolbars share
+one height/corner rhythm, and the export footer uses a lighter white sheet.
+No tooltips, clinical record changes or document-format changes are introduced.
+
 - Ships with `data/drugs.csv` (27 common drugs); copied to AppData on first run.
 - **Import / Replace**: **Settings → Database → Import Database** → any CSV or
   Excel (`.xls` / `.xlsx`). Each medicine row needs either a scientific/generic
@@ -222,7 +246,7 @@ icons and the collapse control have no tooltips, including in collapsed mode.
 - `i18n.py`           – English / Arabic strings
 - `drug_db.py`        – CSV drug database: load / import(replace|merge) / export / search
 - `qr_utils.py`       – prescription model + QR encode/decode
-- `pdf_generator.py`  – A5/A4/Letter full PDF + compact label PDF + Word export (Arabic-aware)
+- `pdf_generator.py`  – A5/A4 full PDF + compact label PDF + Word export (Arabic-aware)
 - `main.py`           – CustomTkinter desktop GUI
 - `viewer.html`       – static decoder page for pharmacists
 - `data/drugs.csv`    – seed drug database

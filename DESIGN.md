@@ -1,5 +1,138 @@
 # Glass dashboard refinement plan
 
+## Uncapped top search width — 2026-09-18
+
+Reference lock: the user's annotated search screenshot requests a wider result
+surface extending to the red line, without a screen-edge cap. Preserve the approved
+white glass style, typography and search-bar left alignment. Only top search opts
+out of horizontal screen fitting, keeping the full doubled width request even if
+it extends beyond a monitor. Vertical row fitting, scrolling and dismissal remain
+unchanged; all other autocomplete menus keep their existing screen limits.
+
+Verification: 85 automated tests passed. The actual App top-search renderer was
+checked with 14 synthetic class results and a vertical scrollbar: it retained the
+full doubled request, with its list filling the widened surface and its left edge
+matching the search bar. The captured surface was reviewed; any portion beyond
+the physical monitor is naturally not visible, but no application width cap applies.
+
+## Double-width top search results — 2026-09-17
+
+Reference lock: preserve the approved popup surface, typography, left alignment,
+keyboard controls and overflow behavior. The user's explicit 2× width request
+changes only the main search results; shared medicine/favorite autocomplete keeps
+its existing width. Double the larger of the field width and content-based request,
+then fit it to the screen's right edge. Existing horizontal scrolling remains
+available when a result exceeds the physical screen width.
+
+Verification: 84 automated tests passed, including an exact 160→320 px width
+check and screen clipping/overflow checks. Isolated English 100% and Arabic 200%
+layout probes passed; the wider popup capture was reviewed.
+
+## Dropdown scope and compact controls — 2026-09-17
+
+Reference lock: preserve the approved white Clinical Glass surfaces, blue outline
+icons and existing layout. The user's requested refinements own the menu scope and
+density; Refero's bundled color guidance supplies the foreground/background pairing
+rule. Font overrides (10–56 px) apply outside Settings only. Settings descendants
+retain their original menu fonts both on creation and when preferences are reapplied.
+Top search popups measure complete result strings, expand within available screen
+width and expose horizontal scrolling only when the text cannot fit. Their left
+edge stays aligned with the search bar. Detailed-class Add Drug uses the existing
+blue plus on white with a pale-blue hover; the command and icon size are unchanged.
+The Settings footer decreases by 16 px, keeping one line of bottom padding. No new
+tooltips, record migrations or export-format changes are introduced.
+
+Verification: 83 automated tests passed, including maximum-size persistence,
+Settings-menu isolation, content-measured popup widths, horizontal overflow access,
+screen bounds with scrollbar height, and the Add Drug command. Four isolated
+English/Arabic probes at 100%/200% passed; Settings, detailed-class controls and
+56 px search results were visually reviewed using synthetic data.
+
+## Search and font controls — 2026-09-17
+
+Reference lock: the supplied screenshot identifies the broken three-sided focus
+outline. Preserve the current white Clinical Glass theme; add vertical inset so
+the transparent entry canvas cannot cover the search frame border. Replace the
+command-key decoration with a matching 18 px blue outline magnifier, following
+Refero's bundled icon grid guidance. General gains one compact two-column font
+card. Default retains existing dropdown typography; explicit pixel-size choices
+apply to native dropdowns, autocomplete results and context menus. Patient-name
+size affects the on-screen input, not prescription typography. Save updates
+existing controls without clearing entered data; restore/reset include the new
+preferences. No tooltips are added.
+
+Verification: 80 automated tests passed. Four isolated English/Arabic layout
+checks at 100% and 200% confirmed the focused search outline, font preferences,
+and General-card visibility. Actual search and Settings captures were reviewed.
+Six synthetic Word files (A5/A4 with header, without header, and medications only)
+were reopened and their OOXML section sizes verified. Word rendering was not
+available because the bundled document runtime has no LibreOffice; physical
+printer-driver behavior is not certified. Live records were not used.
+
+## Eight approved visual refinements — 2026-09-17
+
+Reference lock: preserve the user's Care white/light-gray palette and the
+approved Medication Entry / Settings layout. Refero's bundled icon, typography
+and form craft guidance informs execution; no new live Refero research is claimed.
+
+Decision ledger: native single hairline borders replace inset double outlines;
+white reflections are quieter; 12 px field labels retain 36 px input heights;
+cached 18 px action artwork balances plus, star, trash and arrows while retaining
+the supplied edit silhouette. Number/action anchors stay at the name-input baseline
+even when a linked-brand picker opens. Favorites and Template toolbars share
+36 px search/text-action heights and 9 px corners. The footer uses a borderless
+white sheet. Neutral entry/dropdown borders turn blue on focus without resizing;
+validation colors and existing input bindings are preserved. No tooltips are added.
+
+Scope: visual only, v4.82.0 retained; no record or export-format changes.
+
+Verification: 78 automated checks passed, including action command retention,
+star state changes, color-only focus geometry and preservation of validation
+colors. Eight isolated English/Arabic layout probes at 100%, 125%, 150% and
+200% passed; updated Medication Entry and Clinic Identity screenshots were
+reviewed. Testing does not access the user's live records.
+
+## Approved Medication Entry and Settings implementation — 2026-09-17
+
+Build target: the two Clinical Glass mockups approved by the user. The app
+remains v4.82.0; this change does not alter records or prescription output.
+The user's Care reference owns the white/light-gray canvas, blue accents,
+charcoal type and compact rounded panels. Earlier Linear settings research
+contributes grouping only; Healthie workflow research contributes separation
+of clinical tasks only. Live Refero tools were unavailable; bundled Refero
+craft guidance and the approved visual targets were used instead.
+
+Decision ledger:
+
+| Decision | Source / role | Implementation |
+| --- | --- | --- |
+| White outlined medication actions | Approved Medication Entry preview | All four toolbar actions keep their commands and use white surfaces |
+| Direct reorder arrows | Approved numbered medicine rows | Up/down buttons; drag and context-menu sorting retained on the plain number |
+| Opaque white details | Care reference and Refero form guidance | Frequency/notes match the entry fields, with pale-blue dropdown triggers |
+| White Settings canvas, gray grouped cards | Approved Settings preview | New cached sheet surface; existing shared glass renderer retained |
+| Compact Clinic Identity | Approved contact/logo/preview layout | Three balanced contact fields, inline logo thumbnail, visible live preview |
+| Bottom action breathing room | User requirement and approved preview | Existing 32 px bottom inset retained; restore/reset/save remain distinct |
+| Visible empty-field search hints | Approved search controls | Non-value overlay hints disappear on focus or typing; StringVar search values stay clean |
+
+Glass remains simulated using static gradients and highlights, not real
+desktop transparency or live blur. Hover changes colors only. Existing page
+navigation, plain edit/delete symbols, typography roles, Arabic text bindings,
+save/discard warnings and data formats are preserved.
+
+Implementation evidence: `output/medication-approved-actual.png` and
+`output/settings-approved-actual.png`, captured from an isolated test instance.
+Layout probe: `output/approved_glass_probe.py`, using fresh interpreters for
+English/Arabic and paired widget/window scaling at 100–200%.
+
+Verification: 77 automated tests passed. All eight English/Arabic scaling
+combinations passed layout checks, including clinic preview visibility and
+footer button separation. Screenshot review found and corrected unnecessary
+logo/preview spacing and missing search hints. Tests use isolated application
+data, not the user's records. This is local layout verification, not a claim
+of compatibility certification for every Windows version.
+
+Earlier palette sections below are historical, not the current build target.
+
 ## Current white/light-gray palette — supersedes the charcoal update below
 
 The user's attached `original-07b89ef4ec4344efd01fe788b22e53f5.webp`
@@ -7,7 +140,7 @@ is the current color reference: white shell, light neutral-gray panels,
 saturated-blue accents and charcoal type. Approximate tokens are background
 `#F6F7F9`, cards `#E9EAEC`, fields `#FFFFFF`, sidebar `#EEF0F3`,
 text `#25272A`, secondary `#454C56`, muted `#59616C`, accent `#0960C7`,
-primary `#0964DC`, selection `#E1EBFB`, edges `#C3C9D1`.
+primary `#0964DC`, selection `#E1EBFB`, edges `#CDD2D9`.
 White-gradient reflections and position-aware shared-backdrop sampling remain;
 shadows are softened for the light surfaces. Warning/delete/reference colors
 return to readable light-background variants. Layouts, fonts, records and

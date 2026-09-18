@@ -7,7 +7,7 @@ Features
 * Repeatable drug rows: drug NAME on top, with Dosage / Frequency / Duration /
   Notes boxes directly beneath it (in that order), and autocomplete.
 * Importable drug database (replace / merge) + export.
-* Paper size: A5 / A4 / Letter.
+* Paper size: A5 / A4.
 * Outputs:
     - Preview/Print : full prescription PDF (doctor, patient, drug table, QR).
     - Medication Label : compact Word doc with the full medication content + QR.
@@ -81,7 +81,7 @@ ACCENT_SOFT = "#e1ebfb"
 ICON_BLUE = ACCENT
 NAV_ACTIVE = "#144d99"  # deeper blue distinguishes the selected section
 NAV_ACTIVE_SOFT = ACCENT_SOFT
-LINE = "#c3c9d1"
+LINE = "#cdd2d9"
 MUTED = "#59616c"
 DANGER = "#b63545"
 DANGER_FILL = "#b63545"
@@ -91,6 +91,7 @@ WARNING = "#8b5a0e"
 WARNING_SOFT = "#fff3d6"
 GOOD = PRIMARY
 GOOD_HOVER = ACCENT_HOVER
+SUCCESS = "#176b51"
 
 # Keep editable fields solid even inside the simulated frosted panels.
 for _field_theme in ("CTkEntry", "CTkComboBox"):
@@ -124,7 +125,7 @@ CARD_GAP = 4             # consistent gap without stretching short cards
 SCROLLBAR_HIDDEN_PAGES = frozenset({
     "prescriber", "patient", "treatment_templates", "interaction_review", "reference",
 })
-LABEL_FONT = ("Segoe UI", 10)
+LABEL_FONT = ("Segoe UI", 12)
 BRAND_FONT = ("Segoe UI", 13, "bold")
 SCIENTIFIC_FONT = ("Segoe UI", 13)
 FIELD_HEIGHT = 36        # consistent text-entry and dropdown height
@@ -186,9 +187,9 @@ def glass_reflection(surface="panel"):
     for y in range(96):
         for x in range(96):
             u, v = x / 95, y / 95
-            top_glint = .065 * math.exp(-v * 7) * (1 - .5 * u)
-            bottom_haze = .105 * v ** 1.8 * (1 - .35 * u)
-            strength = min(.11, .012 + top_glint + bottom_haze)
+            top_glint = .045 * math.exp(-v * 7) * (1 - .5 * u)
+            bottom_haze = .075 * v ** 1.8 * (1 - .35 * u)
+            strength = min(.085, .012 + top_glint + bottom_haze)
             pixels[x, y] = round(255 * strength)
     return mask
 
@@ -199,8 +200,8 @@ def glass_panel_image(size, surface, region=(0, 0, 1, 1), tint=None):
     extent = tuple(value * 96 for value in region)
     image = glass_texture("workspace").transform(
         (width, height), Image.Transform.EXTENT, extent, Image.Resampling.BILINEAR)
-    veil = {"workspace": 0, "sidebar": .74, "panel": .88}.get(surface, .88)
-    target = SIDEBAR_SURFACE if surface == "sidebar" else CARD
+    veil = {"workspace": 0, "sidebar": .74, "panel": .88, "sheet": .78}.get(surface, .88)
+    target = SURFACE if surface == "sheet" else SIDEBAR_SURFACE if surface == "sidebar" else CARD
     image = Image.blend(image, Image.new("RGB", image.size, target), veil)
     if surface != "workspace":
         reflection = glass_reflection(surface).resize(image.size, Image.Resampling.BILINEAR)
@@ -213,16 +214,11 @@ def glass_panel_image(size, surface, region=(0, 0, 1, 1), tint=None):
         bounds = (edge, edge, width - edge - 1, height - edge - 1)
         ImageDraw.Draw(mask).rounded_rectangle(bounds, radius=max(0, radius - edge), fill=255)
         if surface != "workspace" and width > 12 and height > 12:
-            # Static inset shadow/highlight: does not increase card dimensions.
-            shade = Image.new("RGBA", image.size)
-            draw = ImageDraw.Draw(shade)
-            draw.rounded_rectangle(bounds, radius=max(0, radius - edge),
-                                   outline=(104, 119, 137, 40), width=3)
-            shade = shade.filter(ImageFilter.GaussianBlur(1.2))
-            image = Image.alpha_composite(image, shade)
-            ImageDraw.Draw(image).rounded_rectangle(
-                (edge + 1, edge + 1, width - edge - 2, height - edge - 2),
-                radius=max(0, radius - edge - 1), outline=(255, 255, 255, 210), width=1)
+            # One native outer border; only a quiet top-edge white reflection.
+            # No inset outline/shadow, which previously looked double-framed.
+            ImageDraw.Draw(image).line(
+                (edge + radius, edge + 1, width - edge - radius - 1, edge + 1),
+                fill=(255, 255, 255, 110), width=1)
     image.putalpha(mask)
     return image
 
@@ -709,6 +705,84 @@ def _ui_font(size=12, weight="normal", family="Segoe UI"):
     return ctk.CTkFont(family=family, size=size, weight=weight)
 
 
+def dropdown_font(baseline=None, master=None):
+    """Default preserves each control's original type; an override is global."""
+    baseline = baseline or _ui_font(13)
+    ancestor = master
+    while ancestor is not None:
+        if getattr(ancestor, "_fixed_dropdown_fonts", False):
+            return baseline
+        ancestor = getattr(ancestor, "master", None)
+    size = cfg.config.ui_font_size("dropdown_font_size")
+    if not size:
+        return baseline
+    if isinstance(baseline, ctk.CTkFont):
+        return _ui_font(size, baseline.cget("weight"), baseline.cget("family"))
+    return _ui_font(size)
+
+
+class PopupListbox(tk.Listbox):
+    def __init__(self, master, **kwargs):
+        self._dropdown_font_baseline = kwargs.get("font", ("Segoe UI", 16))
+        kwargs["font"] = dropdown_font(self._dropdown_font_baseline, master)
+        super().__init__(master, **kwargs)
+
+    def apply_preferences(self):
+        self.configure(font=dropdown_font(self._dropdown_font_baseline, self.master))
+
+
+class VisualMenu(tk.Menu):
+    def __init__(self, master, **kwargs):
+        self._dropdown_font_baseline = kwargs.get("font", ("Segoe UI", 16))
+        kwargs["font"] = dropdown_font(self._dropdown_font_baseline, master)
+        super().__init__(master, **kwargs)
+
+    def apply_preferences(self):
+        self.configure(font=dropdown_font(self._dropdown_font_baseline, self.master))
+
+
+class VisualOptionMenu(ctk.CTkOptionMenu):
+    def __init__(self, master, **kwargs):
+        self._dropdown_font_baseline = kwargs.get("dropdown_font") or _ui_font(13)
+        kwargs["dropdown_font"] = dropdown_font(self._dropdown_font_baseline, master)
+        super().__init__(master, **kwargs)
+
+    def apply_preferences(self):
+        self.configure(dropdown_font=dropdown_font(self._dropdown_font_baseline, self.master))
+
+
+def attach_search_hint(entry, variable, text):
+    """CTk hides native placeholders with StringVar; keep hints out of values."""
+    hint = ctk.CTkLabel(entry, text=text, anchor="w", text_color=MUTED,
+                        fg_color="transparent", font=_ui_font(13), height=22)
+    entry._search_hint = hint
+
+    def refresh(*_args):
+        if not entry.winfo_exists():
+            return
+        if not variable.get() and entry.focus_get() != entry._entry:
+            hint.place(x=10, rely=.5, anchor="w")
+        else:
+            hint.place_forget()
+
+    def focus(_event):
+        hint.place_forget()
+        entry.focus_set()
+
+    trace_id = variable.trace_add("write", refresh)
+    def cleanup(_event):
+        try:
+            variable.trace_remove("write", trace_id)
+        except tk.TclError:
+            pass
+
+    hint.bind("<Button-1>", focus)
+    entry.bind("<FocusIn>", refresh, add="+")
+    entry.bind("<FocusOut>", refresh, add="+")
+    entry.bind("<Destroy>", cleanup, add="+")
+    refresh()
+
+
 @functools.lru_cache(maxsize=8)
 def _edit_icon(display_size=18):
     """Use the supplied transparent edit artwork consistently on every page."""
@@ -723,37 +797,60 @@ def _edit_icon(display_size=18):
 
 
 def autocomplete_layout(anchor_rect, screen_rect, requested_width, row_height,
-                        count, max_rows=10, align_anchor=False):
+                        count, max_rows=10, align_anchor=False, extra_height=0,
+                        cap_width=True):
     """Fit results above/below their field, reserving no unused result rows."""
     ax, ay, aw, ah = anchor_rect
     sx, sy, sw, sh = screen_rect
-    inset, border = 10, 8
+    inset, border = 10, 8 + extra_height
     bottom = sy + sh - inset
     below = max(0, bottom - (ay + ah + 2))
     above = max(0, ay - 2 - (sy + inset))
     room = max(below, above)
     rows = max(1, min(count, max_rows, int(max(0, room - border) // row_height)))
     height = min(rows * row_height + border, sh - inset * 2)
-    width = min(max(aw, requested_width), sw - inset * 2)
-    x = max(sx + inset, min(ax, sx + sw - width - inset))
-    if align_anchor:
-        x = max(sx + inset, min(ax, sx + sw - inset - 1))
-        width = min(width, sx + sw - inset - x)
+    width = max(aw, requested_width)
+    x = ax
+    if cap_width:
+        width = min(width, sw - inset * 2)
+        x = max(sx + inset, min(ax, sx + sw - width - inset))
+        if align_anchor:
+            x = max(sx + inset, min(ax, sx + sw - inset - 1))
+            width = min(width, sx + sw - inset - x)
     y = ay + ah + 2 if below >= height else ay - height - 2
     y = max(sy + inset, min(y, bottom - height))
     return int(width), int(height), int(x), int(y), rows
 
 
-def fit_autocomplete_popup(top, anchor, box, count, max_rows=10, align_anchor=False):
+def fit_autocomplete_popup(top, anchor, box, count, max_rows=10, align_anchor=False,
+                           measure_content=False, width_multiplier=1, cap_width=True):
     """Screen-aware, bordered native popup shared by medicine/quick searches."""
     top.update_idletasks()
     font = tkfont.Font(root=top, font=box.cget("font"))
     row_height = font.metrics("linespace") + 2
+    requested_width = box.winfo_reqwidth()
+    content_width = 0
+    if measure_content:
+        content_width = max((font.measure(item) for item in box.get(0, tk.END)), default=0)
+        requested_width = max(requested_width, content_width + 36)
+    requested_width = max(anchor.winfo_width(), requested_width) * width_multiplier
     layout = autocomplete_layout(
         (anchor.winfo_rootx(), anchor.winfo_rooty(), anchor.winfo_width(), anchor.winfo_height()),
         (0, 0, top.winfo_screenwidth(), top.winfo_screenheight()),
-        box.winfo_reqwidth(), row_height, count, max_rows, align_anchor)
+        requested_width, row_height, count, max_rows, align_anchor,
+        cap_width=cap_width)
     width, height, x, y, rows = layout
+    if measure_content and content_width + 36 > width:
+        horizontal = tk.Scrollbar(top, orient="horizontal", command=box.xview)
+        top.update_idletasks()
+        layout = autocomplete_layout(
+            (anchor.winfo_rootx(), anchor.winfo_rooty(), anchor.winfo_width(), anchor.winfo_height()),
+            (0, 0, top.winfo_screenwidth(), top.winfo_screenheight()),
+            requested_width, row_height, count, max_rows, align_anchor,
+            extra_height=horizontal.winfo_reqheight() + 3, cap_width=cap_width)
+        width, height, x, y, rows = layout
+        horizontal.pack(side="bottom", fill="x", padx=3, pady=(0, 3))
+        box.configure(xscrollcommand=horizontal.set)
     box.configure(height=rows)
     if count > rows:
         scrollbar = tk.Scrollbar(top, command=box.yview)
@@ -763,6 +860,125 @@ def fit_autocomplete_popup(top, anchor, box, count, max_rows=10, align_anchor=Fa
     top.configure(background=LINE)
     top.geometry(f"{width}x{height}+{x}+{y}")
     top.lift()
+
+
+@functools.lru_cache(maxsize=32)
+def action_icon(symbol, color=ACCENT):
+    """Optically balanced desktop action artwork, independent of glyph fonts."""
+    image = Image.new("RGBA", (96, 96))
+    draw = ImageDraw.Draw(image)
+    def line(points):
+        draw.line([(round(x * 4), round(y * 4)) for x, y in points], fill=color, width=8, joint="curve")
+    if symbol in {"+", "＋"}:
+        line([(12, 4), (12, 20)])
+        line([(4, 12), (20, 12)])
+    elif symbol in {"↑", "↓"}:
+        flip = (lambda y: 24 - y) if symbol == "↓" else (lambda y: y)
+        line([(12, flip(20)), (12, flip(4))])
+        line([(5, flip(11)), (12, flip(4)), (19, flip(11))])
+    elif symbol == "🗑":
+        line([(4, 6), (20, 6)])
+        line([(9, 6), (9, 3), (15, 3), (15, 6)])
+        line([(6, 6), (7, 21), (17, 21), (18, 6)])
+        line([(10, 10), (10, 17)])
+        line([(14, 10), (14, 17)])
+    elif symbol == "search":
+        draw.ellipse((12, 12, 66, 66), outline=color, width=8)
+        line([(16, 16), (22, 22)])
+    else:
+        points = []
+        for index in range(10):
+            angle = -math.pi / 2 + index * math.pi / 5
+            radius = 10 if index % 2 == 0 else 4.6
+            points.append((48 + round(4 * radius * math.cos(angle)),
+                           48 + round(4 * radius * math.sin(angle))))
+        if symbol == "★":
+            draw.polygon(points, fill=color)
+        else:
+            draw.line(points + points[:1], fill=color, width=8, joint="curve")
+    return ctk.CTkImage(image.resize((48, 48), Image.Resampling.LANCZOS), size=(18, 18))
+
+
+class VisualButton(ctk.CTkButton):
+    """Keep action commands/text semantics while giving glyph actions one grid."""
+    SYMBOLS = frozenset({"+", "＋", "↑", "↓", "🗑", "★", "☆"})
+
+    def __init__(self, master, **kwargs):
+        self._action_symbol = None
+        symbol = kwargs.get("text")
+        if symbol in self.SYMBOLS and kwargs.get("image") is None:
+            self._action_symbol = symbol
+            color = kwargs.get("text_color", ACCENT)
+            if isinstance(color, (list, tuple)):
+                color = color[0]
+            kwargs.update(text="", image=action_icon(symbol, color),
+                          width=max(30, kwargs.get("width", 30)),
+                          height=max(30, kwargs.get("height", 30)))
+        super().__init__(master, **kwargs)
+
+    def configure(self, **kwargs):
+        if "text" in kwargs:
+            symbol = kwargs["text"]
+            if symbol in self.SYMBOLS:
+                self._action_symbol = symbol
+                color = self._apply_appearance_mode(kwargs.get("text_color", self.cget("text_color")))
+                kwargs.update(text="", image=action_icon(symbol, color))
+            elif self._action_symbol is not None:
+                self._action_symbol = None
+                kwargs.setdefault("image", None)
+        super().configure(**kwargs)
+
+    def cget(self, attribute_name):
+        if attribute_name == "text" and self._action_symbol is not None:
+            return self._action_symbol
+        return super().cget(attribute_name)
+
+
+class FieldFocus:
+    """Color-only focus feedback; never changes geometry or replaces bindings."""
+    def _bind_field_focus(self):
+        self._focus_border = None
+        self.bind("<FocusIn>", self._field_focused, add="+")
+        self.bind("<FocusOut>", self._field_blurred, add="+")
+
+    def _field_focused(self, _event=None):
+        color = self.cget("border_color")
+        if color == LINE or color == [LINE, LINE]:
+            self._focus_border = color
+            self.configure(border_color=ACCENT)
+
+    def _field_blurred(self, _event=None):
+        if self._focus_border is not None and self.cget("border_color") == ACCENT:
+            self.configure(border_color=self._focus_border)
+        self._focus_border = None
+
+
+class VisualEntry(FieldFocus, ctk.CTkEntry):
+    def __init__(self, master, **kwargs):
+        kwargs.setdefault("border_width", 1)
+        super().__init__(master, **kwargs)
+        self._bind_field_focus()
+
+
+class VisualComboBox(FieldFocus, ctk.CTkComboBox):
+    def __init__(self, master, **kwargs):
+        kwargs.setdefault("border_width", 1)
+        self._dropdown_font_baseline = kwargs.get("dropdown_font") or _ui_font(13)
+        kwargs["dropdown_font"] = dropdown_font(self._dropdown_font_baseline, master)
+        super().__init__(master, **kwargs)
+        self._bind_field_focus()
+
+    def apply_preferences(self):
+        self.configure(dropdown_font=dropdown_font(self._dropdown_font_baseline, self.master))
+
+
+def polish_toolbar(frame):
+    """One compact rhythm for search and text actions, not icon hit areas."""
+    for widget in frame.winfo_children():
+        if isinstance(widget, (ctk.CTkEntry, ctk.CTkComboBox, ctk.CTkOptionMenu)):
+            widget.configure(height=FIELD_HEIGHT, corner_radius=9)
+        elif isinstance(widget, VisualButton) and widget._action_symbol is None and widget.cget("image") is None:
+            widget.configure(height=FIELD_HEIGHT, corner_radius=9)
 
 
 class DrugRow(GlassFrame):
@@ -799,21 +1015,32 @@ class DrugRow(GlassFrame):
             names, text="1.", width=28, height=36,
             fg_color="transparent", text_color=MUTED,
             font=ctk.CTkFont(weight="bold", size=12))
-        self.number_badge.grid(row=0, column=0, sticky="s", padx=(0, 4))
+        self.number_badge.grid(row=0, column=0, sticky="n", padx=(0, 4), pady=(30, 0))
         header_actions = ctk.CTkFrame(names, fg_color="transparent")
-        header_actions.grid(row=0, column=3, sticky="s", padx=(4, 0))
-        self.drag_handle = ctk.CTkButton(
-            header_actions, text="⠿", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE, corner_radius=7,
+        header_actions.grid(row=0, column=3, sticky="n", padx=(4, 0), pady=(33, 0))
+        self.move_up_button = VisualButton(
+            header_actions, text="↑", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE, corner_radius=7,
             fg_color="transparent", text_color=ACCENT, border_width=0,
-            hover_color=ACCENT_SOFT, font=ctk.CTkFont(size=16, weight="bold"),
-            command=self._show_move_menu)
-        self.drag_handle.pack(side="left", padx=2)
+            hover_color=ACCENT_SOFT, font=ctk.CTkFont(size=18),
+            command=lambda: self.on_move_up(self))
+        self.move_up_button.pack(side="left", padx=2)
+        self.move_down_button = VisualButton(
+            header_actions, text="↓", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE,
+            corner_radius=7, fg_color="transparent", text_color=ACCENT,
+            hover_color=ACCENT_SOFT, font=ctk.CTkFont(size=18),
+            command=lambda: self.on_move_down(self))
+        self.move_down_button.pack(side="left", padx=2)
+        for button in (self.move_up_button, self.move_down_button):
+            button.bind("<Button-3>", self._show_move_menu)
+            button.bind("<Shift-F10>", self._show_move_menu)
+        # The plain row number retains drag sorting and the keyboard/context menu.
+        self.drag_handle = self.number_badge
         self.drag_handle.bind("<ButtonPress-1>", self._drag_start)
         self.drag_handle.bind("<B1-Motion>", self._drag_motion)
         self.drag_handle.bind("<ButtonRelease-1>", self._drag_end)
         self.drag_handle.bind("<Button-3>", self._show_move_menu)
         self.drag_handle.bind("<Shift-F10>", self._show_move_menu)
-        ctk.CTkButton(
+        VisualButton(
             header_actions, text="🗑", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE, corner_radius=7,
             fg_color="transparent", text_color=DANGER, border_width=0,
             hover_color=DANGER_SOFT, font=ctk.CTkFont(size=14),
@@ -824,7 +1051,7 @@ class DrugRow(GlassFrame):
         science_col.grid(row=0, column=2, sticky="ew", padx=(4, 0))
         ctk.CTkLabel(trade_col, text=I.t("generic_trade_name"), anchor="w", text_color=MUTED,
                      font=LABEL_FONT).pack(fill="x", pady=(0, 2))
-        self.trade_entry = ctk.CTkEntry(trade_col, textvariable=self.trade_var,
+        self.trade_entry = VisualEntry(trade_col, textvariable=self.trade_var,
                                         fg_color=SURFACE, text_color=TEXT,
                                         placeholder_text=I.t("generic_trade_name"), height=36,
                                         corner_radius=8, border_color=LINE,
@@ -838,15 +1065,15 @@ class DrugRow(GlassFrame):
                      font=LABEL_FONT).pack(side="left")
         science_input_row = ctk.CTkFrame(science_col, fg_color="transparent")
         science_input_row.pack(fill="x")
-        self.name_entry = ctk.CTkEntry(
+        self.name_entry = VisualEntry(
             science_input_row, textvariable=self.name_var,
             fg_color=SURFACE, text_color=TEXT,
             placeholder_text=I.t("scientific_name"), height=36,
             corner_radius=8, border_color=LINE,
             font=SCIENTIFIC_FONT)
         self.name_entry.pack(side="left", fill="x", expand=True)
-        self.reference_button = ctk.CTkButton(
-            science_input_row, text="!", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE, corner_radius=8,
+        self.reference_button = VisualButton(
+            science_input_row, text="!", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE, corner_radius=15,
             fg_color=WARNING_SOFT, text_color=WARNING, border_width=1,
             border_color=WARNING, hover_color=WARNING_SOFT,
             font=ctk.CTkFont(size=15, weight="bold"),
@@ -858,7 +1085,7 @@ class DrugRow(GlassFrame):
             entry.bind("<Up>", self._ac_up)
             entry.bind("<Return>", self._ac_choose_current)
             entry.bind("<Escape>", lambda _event: self._hide_ac())
-        self.trade_picker = ctk.CTkOptionMenu(
+        self.trade_picker = VisualOptionMenu(
             trade_col, values=[I.t("choose_linked_trade_name")], height=28,
             fg_color=ACCENT_SOFT, text_color=ACCENT, button_color=PRIMARY,
             button_hover_color=ACCENT_HOVER, command=self._choose_linked_trade)
@@ -894,12 +1121,12 @@ class DrugRow(GlassFrame):
         quantity_head = ctk.CTkFrame(quantity_col, fg_color="transparent")
         quantity_head.pack(fill="x", pady=(0, 2))
         ctk.CTkLabel(quantity_head, text=I.t("quantity"), anchor="w",
-                     text_color=MUTED, font=ctk.CTkFont(size=10, weight="bold")).pack(
+                     text_color=MUTED, font=LABEL_FONT).pack(
                          side="left", fill="x", expand=True)
-        ctk.CTkButton(quantity_head, text="↻", width=25, height=22,
+        VisualButton(quantity_head, text="↻", width=25, height=22,
                       fg_color="transparent", text_color=ACCENT,
                       hover_color=ACCENT_SOFT, command=self.recalculate_quantity).pack(side="right")
-        self.quantity_entry = ctk.CTkEntry(
+        self.quantity_entry = VisualEntry(
             quantity_col, textvariable=self.quantity_var, height=FIELD_HEIGHT,
             corner_radius=9, border_color=LINE, placeholder_text=I.t("quantity_auto"),
             font=ctk.CTkFont(size=11), justify="left")
@@ -919,16 +1146,16 @@ class DrugRow(GlassFrame):
             reference_head, text=I.t("gemini_reference_title"), text_color=WARNING,
             font=ctk.CTkFont(size=12, weight="bold"), anchor="w").pack(
                 side="left", fill="x", expand=True)
-        ctk.CTkButton(
+        VisualButton(
             reference_head, text=I.t("gemini_refresh"), width=72, height=28,
             fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT,
             command=lambda: self.on_reference(self, True)).pack(side="right", padx=2)
-        ctk.CTkButton(
+        VisualButton(
             reference_head, text=I.t("gemini_copy"), width=58, height=28,
             fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, command=self.copy_reference).pack(side="right", padx=2)
-        ctk.CTkButton(
+        VisualButton(
             reference_head, text="×", width=30, height=28,
             fg_color="transparent", text_color=MUTED, hover_color=ACCENT_SOFT,
             command=self.close_reference).pack(side="right", padx=2)
@@ -964,7 +1191,7 @@ class DrugRow(GlassFrame):
         if self._drag_moved:
             return "break"
         self._close_move_menu()
-        menu = tk.Menu(
+        menu = VisualMenu(
             self, tearoff=False, font=("Segoe UI", 16, "bold"),
             background=CARD, foreground=ACCENT,
             activebackground=ACCENT_SOFT, activeforeground=ACCENT,
@@ -1069,7 +1296,7 @@ class DrugRow(GlassFrame):
                      font=LABEL_FONT).pack(fill="x", pady=(0, 2))
         binding = DirectionalTextBinding(self, var)
         self._bidi_bindings.append(binding)
-        e = ctk.CTkEntry(col, textvariable=binding.display_var,
+        e = VisualEntry(col, textvariable=binding.display_var,
                          height=FIELD_HEIGHT, corner_radius=9,
                          border_color=LINE, placeholder_text=ph,
                          font=ctk.CTkFont(size=11), justify="left")
@@ -1087,12 +1314,12 @@ class DrugRow(GlassFrame):
                          fill="x", pady=(0, 2))
         binding = DirectionalTextBinding(self, var)
         self._bidi_bindings.append(binding)
-        picker = ctk.CTkComboBox(
+        picker = VisualComboBox(
             col, values=[directional_display_text(value) for value in FREQUENCY_OPTIONS],
             variable=binding.display_var, height=FIELD_HEIGHT,
-            corner_radius=9, border_width=2, border_color=ACCENT, fg_color=CARD,
-            button_color=PRIMARY, button_hover_color=ACCENT_HOVER,
-            dropdown_fg_color=CARD, dropdown_hover_color=ACCENT_SOFT,
+            corner_radius=9, border_width=1, border_color=LINE, fg_color=SURFACE,
+            button_color=ACCENT_SOFT, button_hover_color=LINE,
+            dropdown_fg_color=SURFACE, dropdown_hover_color=ACCENT_SOFT,
             font=ctk.CTkFont(size=13), dropdown_font=_ui_font(16),
             justify="left",
             command=lambda _value: self.on_change())
@@ -1110,12 +1337,12 @@ class DrugRow(GlassFrame):
                          fill="x", pady=(0, 2))
         binding = DirectionalTextBinding(self, var)
         self._bidi_bindings.append(binding)
-        picker = ctk.CTkComboBox(
+        picker = VisualComboBox(
             col, values=[directional_display_text(value) for value in NOTE_OPTIONS],
             variable=binding.display_var, height=FIELD_HEIGHT,
-            corner_radius=9, border_width=2, border_color=ACCENT, fg_color=CARD,
-            button_color=PRIMARY, button_hover_color=ACCENT_HOVER,
-            dropdown_fg_color=CARD, dropdown_hover_color=ACCENT_SOFT,
+            corner_radius=9, border_width=1, border_color=LINE, fg_color=SURFACE,
+            button_color=ACCENT_SOFT, button_hover_color=LINE,
+            dropdown_fg_color=SURFACE, dropdown_hover_color=ACCENT_SOFT,
             font=ctk.CTkFont(size=13), dropdown_font=_ui_font(16),
             justify="left",
             command=lambda _value: self.on_change())
@@ -1219,7 +1446,7 @@ class DrugRow(GlassFrame):
         self._ac_matches = matches
         self._ac_mode = mode
         self._ac_index = -1
-        lb = tk.Listbox(top,
+        lb = PopupListbox(top,
                         height=min(10, len(matches)),
                         font=LIST_FONT,
                         bg=CARD, fg=TEXT, relief="flat", borderwidth=0,
@@ -1410,7 +1637,7 @@ class App(ctk.CTk):
             dashboard_heading, text=I.t("dashboard"), text_color=TEXT,
             font=ctk.CTkFont(weight="bold", size=16), anchor="w")
         self.dashboard_title.pack(side="left", fill="x", expand=True)
-        self.dashboard_toggle = ctk.CTkButton(
+        self.dashboard_toggle = VisualButton(
             dashboard_heading, text="‹", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE,
             fg_color="transparent", text_color=ACCENT, hover_color=ACCENT_SOFT,
             font=_ui_font(18, "bold"), command=self.toggle_dashboard)
@@ -1463,18 +1690,18 @@ class App(ctk.CTk):
         self.build_forms()
 
         # action bar (fixed footer)
-        self.action = GlassFrame(self, height=44, fg_color=CARD,
-                                   border_color=LINE, border_width=1,
-                                   corner_radius=12)
+        self.action = GlassFrame(self, height=44, fg_color=SURFACE,
+                                   glass_surface="sheet", border_color=LINE, border_width=0,
+                                   corner_radius=8)
         self.action.pack(side="bottom", fill="x", padx=4, pady=(0, 4))
         # left cluster
-        ctk.CTkButton(self.action, text=I.t("preview"),
+        VisualButton(self.action, text=I.t("preview"),
                       width=_ui_font(12).measure(I.t("preview")) + 22, height=ACTION_HEIGHT,
                       font=_ui_font(12),
                       corner_radius=9, fg_color=CARD, text_color=ACCENT,
                       border_color=LINE, border_width=1, hover_color=ACCENT_SOFT,
                       command=self.preview).pack(side="left", padx=6)
-        ctk.CTkButton(self.action, text=I.t("clear"),
+        VisualButton(self.action, text=I.t("clear"),
                       width=_ui_font(12).measure(I.t("clear")) + 22, height=ACTION_HEIGHT,
                       font=_ui_font(12),
                       corner_radius=9, fg_color=CARD, text_color=MUTED,
@@ -1484,13 +1711,13 @@ class App(ctk.CTk):
             self.action, text="", text_color=MUTED,
             font=ctk.CTkFont(size=10), anchor="w")
         # right cluster (Word exports)
-        ctk.CTkButton(self.action, text=I.t("export_compact"),
+        VisualButton(self.action, text=I.t("export_compact"),
                       width=_ui_font(12).measure(I.t("export_compact")) + 22,
                       height=ACTION_HEIGHT, font=_ui_font(12),
                       corner_radius=9, fg_color=CARD, text_color=ACCENT,
                       border_color=LINE, border_width=1, hover_color=ACCENT_SOFT,
                       command=self.export_label).pack(side="right", padx=6)
-        ctk.CTkButton(self.action, text=I.t("export_word"),
+        VisualButton(self.action, text=I.t("export_word"),
                       width=_ui_font(12).measure(I.t("export_word")) + 22,
                       height=ACTION_HEIGHT, font=_ui_font(12),
                       corner_radius=9, fg_color=CARD, text_color=ACCENT,
@@ -1500,20 +1727,21 @@ class App(ctk.CTk):
         self.add_row()
         self.load_profile_into_ui()
         self.show_page("prescriber")
+        self.apply_ui_font_preferences()
 
     def _build_quick_prescribe(self):
         bar = GlassFrame(self.content, fg_color=CARD, border_color=LINE,
                            border_width=1, corner_radius=10)
         bar.pack(fill="x", padx=3, pady=(0, 4))
         self._quick_search_bar = bar
-        ctk.CTkLabel(bar, text="⌘", width=34, text_color=ACCENT,
+        ctk.CTkLabel(bar, text="", image=action_icon("search"), width=34, text_color=ACCENT,
                      font=ctk.CTkFont(size=18, weight="bold")).pack(side="left", padx=(7, 0))
         self.quick_prescribe_var = tk.StringVar()
-        self.quick_prescribe_entry = ctk.CTkEntry(
+        self.quick_prescribe_entry = VisualEntry(
             bar, textvariable=self.quick_prescribe_var,
             placeholder_text=I.t("quick_prescribe_placeholder"), height=FIELD_HEIGHT,
             border_width=0, fg_color="transparent", font=ctk.CTkFont(size=13))
-        self.quick_prescribe_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.quick_prescribe_entry.pack(side="left", fill="x", expand=True, padx=(0, 10), pady=4)
         self.quick_prescribe_entry.bind(
             "<FocusIn>", lambda _event: bar.configure(border_color=ACCENT))
         self.quick_prescribe_entry.bind(
@@ -1527,6 +1755,8 @@ class App(ctk.CTk):
         self.quick_prescribe_entry.bind("<Up>", lambda _event: self._quick_move(-1))
         self.quick_prescribe_entry.bind("<Return>", self._quick_choose)
         self.quick_prescribe_entry.bind("<Escape>", lambda _event: self._hide_quick_results())
+        attach_search_hint(self.quick_prescribe_entry, self.quick_prescribe_var,
+                           I.t("quick_prescribe_placeholder"))
         self.bind_all("<Control-k>", self._focus_quick_prescribe)
         self.bind_all("<Button-1>", self._quick_click_outside, add="+")
 
@@ -1585,14 +1815,15 @@ class App(ctk.CTk):
         top = tk.Toplevel(self)
         top.wm_overrideredirect(True)
         top.geometry(f"+{self.quick_prescribe_entry.winfo_rootx()}+{self.quick_prescribe_entry.winfo_rooty() + self.quick_prescribe_entry.winfo_height()}")
-        box = tk.Listbox(top, height=min(10, len(results)), width=70,
+        box = PopupListbox(top, height=min(10, len(results)), width=70,
                          font=("Segoe UI", 21), bg=CARD, fg=TEXT,
                          relief="flat", borderwidth=0, selectbackground=PRIMARY,
                          highlightthickness=1, highlightbackground=LINE,
                          selectforeground="white", activestyle="none", exportselection=False)
         for kind, label, _action, _payload in results:
             box.insert(tk.END, f"{kind}  ·  {label}")
-        fit_autocomplete_popup(top, self._quick_search_bar, box, len(results), align_anchor=True)
+        fit_autocomplete_popup(top, self._quick_search_bar, box, len(results), align_anchor=True,
+                               measure_content=True, width_multiplier=2, cap_width=False)
         box.selection_set(0)
         box.bind("<Double-Button-1>", self._quick_choose)
         box.bind("<Return>", self._quick_choose)
@@ -1756,7 +1987,7 @@ class App(ctk.CTk):
         row.pack(fill="x", padx=6, pady=2)
         indicator = ctk.CTkFrame(row, width=3, height=22, corner_radius=1,
                                  fg_color=NAV_ACTIVE)
-        button = ctk.CTkButton(
+        button = VisualButton(
             row, text=text, image=normal_icon, compound="left",
             anchor="w", height=36, corner_radius=8,
             fg_color="transparent", text_color=TEXT_SECONDARY, hover_color=ACCENT_SOFT,
@@ -1774,7 +2005,7 @@ class App(ctk.CTk):
     def _add_dashboard_action(self, key, text, command):
         icon = _dashboard_icon(key)
         self._dashboard_action_icons.append(icon)
-        button = ctk.CTkButton(
+        button = VisualButton(
             self.dashboard, text=text, image=icon, compound="left",
             anchor="w", height=36,
             corner_radius=8, fg_color="transparent", text_color=ACCENT,
@@ -1869,7 +2100,7 @@ class App(ctk.CTk):
             binding = DirectionalTextBinding(self, var)
             self._bidi_bindings.append(binding)
             display_var = binding.display_var
-        entry = ctk.CTkEntry(
+        entry = VisualEntry(
             row, textvariable=display_var, width=width, height=FIELD_HEIGHT,
             corner_radius=9, border_color=LINE, placeholder_text=placeholder,
             justify="left")
@@ -1891,7 +2122,7 @@ class App(ctk.CTk):
         ).pack(side="left")
         binding = DirectionalTextBinding(self, var)
         self._bidi_bindings.append(binding)
-        self.specialty_menu = ctk.CTkComboBox(
+        self.specialty_menu = VisualComboBox(
             row, values=self._specialty_values(var.get()),
             variable=binding.display_var,
             width=width, height=FIELD_HEIGHT, corner_radius=9,
@@ -1953,7 +2184,7 @@ class App(ctk.CTk):
         code_of = {I.t("sex_m"): "M", I.t("sex_f"): "F"}
         cur = var.get()
         sel = next((lab for lab, c in code_of.items() if c == cur), opts[0])
-        om = ctk.CTkOptionMenu(row, values=opts, width=120, height=FIELD_HEIGHT,
+        om = VisualOptionMenu(row, values=opts, width=120, height=FIELD_HEIGHT,
                                corner_radius=9, fg_color=ACCENT_SOFT,
                                text_color=ACCENT, button_color=PRIMARY,
                                button_hover_color=ACCENT_HOVER,
@@ -1991,7 +2222,7 @@ class App(ctk.CTk):
         self.specialty_field(
             d, I.t("specialty"), self.doctor_vars["specialty"],
             PRESCRIBER_FIELD_WIDTH)
-        ctk.CTkButton(
+        VisualButton(
             d, text=I.t("save_profile"), width=150, height=ACTION_HEIGHT,
             corner_radius=9, fg_color=GOOD, hover_color=GOOD_HOVER,
             command=self.save_profile).pack(
@@ -2013,11 +2244,11 @@ class App(ctk.CTk):
                      font=ctk.CTkFont(size=11), anchor="w").pack(fill="x", pady=(0, 3))
         patient_name_binding = DirectionalTextBinding(self, self.patient_vars["name"])
         self._bidi_bindings.append(patient_name_binding)
-        self.patient_name_entry = ctk.CTkEntry(
+        self.patient_name_entry = VisualEntry(
             name_col, textvariable=patient_name_binding.display_var,
             width=PATIENT_NAME_WIDTH, height=FIELD_HEIGHT,
             corner_radius=9, border_color=LINE,
-            font=ctk.CTkFont(size=14), justify="left")
+            font=_ui_font(cfg.config.ui_font_size("patient_name_font_size")), justify="left")
         patient_name_binding.attach(self.patient_name_entry)
         self.patient_name_entry.pack(fill="x")
 
@@ -2025,7 +2256,7 @@ class App(ctk.CTk):
         age_col.grid(row=0, column=1, sticky="ew", padx=6)
         ctk.CTkLabel(age_col, text=I.t("age"), text_color=MUTED,
                      font=ctk.CTkFont(size=11), anchor="w").pack(fill="x", pady=(0, 3))
-        self.patient_age_entry = ctk.CTkEntry(
+        self.patient_age_entry = VisualEntry(
             age_col, textvariable=self.patient_vars["age"], width=PATIENT_AGE_WIDTH,
             height=FIELD_HEIGHT,
             corner_radius=9, border_color=LINE, font=ctk.CTkFont(size=14),
@@ -2038,7 +2269,7 @@ class App(ctk.CTk):
                      font=ctk.CTkFont(size=11), anchor="w").pack(fill="x", pady=(0, 3))
         sex_labels = [I.t("sex_m"), I.t("sex_f")]
         self._patient_sex_codes = {I.t("sex_m"): "M", I.t("sex_f"): "F"}
-        self.patient_sex_menu = ctk.CTkOptionMenu(
+        self.patient_sex_menu = VisualOptionMenu(
             sex_col, values=sex_labels, width=PATIENT_SEX_WIDTH,
             height=FIELD_HEIGHT, corner_radius=9,
             fg_color=ACCENT_SOFT, text_color=ACCENT, button_color=PRIMARY,
@@ -2049,19 +2280,19 @@ class App(ctk.CTk):
 
         patient_actions = ctk.CTkFrame(p, fg_color="transparent")
         patient_actions.pack(fill="x", padx=PAD, pady=(1, PAD))
-        patient_new_button = ctk.CTkButton(
+        patient_new_button = VisualButton(
             patient_actions, text="＋", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE,
             fg_color="transparent", text_color=ACCENT, border_width=0,
             hover_color=ACCENT_SOFT, font=ctk.CTkFont(size=20, weight="bold"),
             command=self.new_patient)
         patient_new_button.pack(side="left", padx=(0, 4))
-        patient_save_button = ctk.CTkButton(
+        patient_save_button = VisualButton(
             patient_actions, text="💾", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE,
             fg_color="transparent", text_color=ACCENT, border_width=0,
             hover_color=ACCENT_SOFT, font=ctk.CTkFont(size=17),
             command=self.save_patient_history)
         patient_save_button.pack(side="left", padx=4)
-        self.patient_delete_button = ctk.CTkButton(
+        self.patient_delete_button = VisualButton(
             patient_actions, text="🗑", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE,
             fg_color="transparent", text_color=DANGER, border_width=0,
             hover_color=DANGER_SOFT, font=ctk.CTkFont(size=17),
@@ -2089,7 +2320,7 @@ class App(ctk.CTk):
         patient_finder.grid(row=0, column=0, sticky="nw", padx=(0, 10))
         patient_search_binding = DirectionalTextBinding(self, self.patient_search_var)
         self._bidi_bindings.append(patient_search_binding)
-        self.patient_search_entry = ctk.CTkEntry(
+        self.patient_search_entry = VisualEntry(
             patient_finder, textvariable=patient_search_binding.display_var,
             width=PATIENT_SEARCH_WIDTH,
             height=FIELD_HEIGHT, placeholder_text=I.t("search_patients"),
@@ -2103,7 +2334,7 @@ class App(ctk.CTk):
             border_color=LINE, border_width=1, corner_radius=9)
         result_shell.pack_propagate(False)
         result_shell.pack(anchor="w")
-        self.patient_history_list = tk.Listbox(result_shell, height=5,
+        self.patient_history_list = PopupListbox(result_shell, height=5,
                                                font=LIST_FONT, bg=SURFACE, fg=TEXT,
                                                relief="flat", borderwidth=0, highlightthickness=0,
                                                selectbackground=PRIMARY, selectforeground="white",
@@ -2140,7 +2371,7 @@ class App(ctk.CTk):
         self.medication_subpage = ctk.CTkFrame(self.pages["medications"], fg_color="transparent")
         subpage_bar = ctk.CTkFrame(self.medication_subpage, fg_color="transparent")
         subpage_bar.pack(fill="x", pady=(4, 8))
-        ctk.CTkButton(
+        VisualButton(
             subpage_bar, text=I.t("back"), width=70, height=32,
             fg_color=CARD, text_color=ACCENT, border_color=LINE, border_width=1,
             hover_color=ACCENT_SOFT, command=self.close_medication_subpage).pack(side="left")
@@ -2150,25 +2381,25 @@ class App(ctk.CTk):
         medication_toolbar = ctk.CTkFrame(
             self.medication_main, fg_color="transparent")
         medication_toolbar.pack(fill="x", padx=2, pady=(0, 4))
-        ctk.CTkButton(
+        VisualButton(
             medication_toolbar, text=I.t("add_drug"),
             width=_ui_font(12).measure(I.t("add_drug")) + 22,
-            height=32, font=_ui_font(12), corner_radius=8, fg_color=CARD,
+            height=32, font=_ui_font(12), corner_radius=8, fg_color=SURFACE,
             text_color=ACCENT, border_color=LINE, border_width=1,
             hover_color=ACCENT_SOFT, command=self.add_row).pack(side="left", padx=(0, 5))
-        self.medication_favorites_button = ctk.CTkButton(
+        self.medication_favorites_button = VisualButton(
             medication_toolbar, text=I.t("starred_drugs"),
             width=_ui_font(12).measure(I.t("starred_drugs")) + 22,
-            height=32, font=_ui_font(12), corner_radius=8, fg_color=CARD,
+            height=32, font=_ui_font(12), corner_radius=8, fg_color=SURFACE,
             text_color=ACCENT, border_color=LINE, border_width=1,
             hover_color=ACCENT_SOFT,
             command=self.toggle_medication_favorite_picker)
         self.medication_favorites_button.pack(side="left")
-        ctk.CTkButton(
+        VisualButton(
             medication_toolbar, text=I.t("save_patient_prescription"),
             width=_ui_font(12).measure(I.t("save_patient_prescription")) + 22,
             height=32, font=_ui_font(12), corner_radius=8,
-            fg_color=CARD, text_color=ACCENT, border_color=LINE, border_width=1,
+            fg_color=SURFACE, text_color=ACCENT, border_color=LINE, border_width=1,
             hover_color=ACCENT_SOFT,
             command=self.save_prescription_for_patient).pack(side="left", padx=(5, 0))
 
@@ -2181,13 +2412,13 @@ class App(ctk.CTk):
         self.medication_favorite_search_var = tk.StringVar()
         self.medication_favorite_search_var.trace_add(
             "write", lambda *_: self.refresh_medication_favorite_picker())
-        self.medication_favorite_search_entry = ctk.CTkEntry(
+        self.medication_favorite_search_entry = VisualEntry(
             favorite_picker_head, textvariable=self.medication_favorite_search_var,
             placeholder_text=I.t("search_starred_drugs"), height=36,
             border_color=LINE, corner_radius=8)
         self.medication_favorite_search_entry.pack(
             side="left", fill="x", expand=True, padx=(0, 6))
-        ctk.CTkButton(
+        VisualButton(
             favorite_picker_head, text="×", width=34, height=32,
             fg_color="transparent", text_color=MUTED, hover_color=ACCENT_SOFT,
             command=self.close_medication_subpage).pack(side="right")
@@ -2210,7 +2441,7 @@ class App(ctk.CTk):
         review.pack_configure(pady=(12, CARD_GAP))
         ctk.CTkLabel(review, text=I.t("interaction_review_tip"), text_color=MUTED,
                      justify="left", wraplength=720, anchor="w").pack(fill="x", padx=PAD, pady=(12, 6))
-        self.medscape_button = ctk.CTkButton(
+        self.medscape_button = VisualButton(
             review, text=I.t("check_medscape"), height=ACTION_HEIGHT, width=250,
             fg_color=CARD, text_color=ACCENT, border_width=1,
             border_color=LINE, hover_color=ACCENT_SOFT,
@@ -2220,12 +2451,12 @@ class App(ctk.CTk):
         preview = self.section(self.medication_subpage, "")
         self.word_preview_section = preview
         preview.pack_forget()
-        self.word_preview_toggle = ctk.CTkButton(
+        self.word_preview_toggle = VisualButton(
             medication_toolbar, text=I.t("show_word_preview"),
             width=max(_ui_font(12).measure(I.t(key)) for key in (
                 "show_word_preview", "hide_word_preview")) + 22,
             height=32, font=_ui_font(12),
-            fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
+            fg_color=SURFACE, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, command=self.toggle_word_preview)
         self.word_preview_toggle.pack(side="left", padx=(5, 0))
         self.word_preview_body = ctk.CTkFrame(preview, fg_color="transparent")
@@ -2239,31 +2470,31 @@ class App(ctk.CTk):
         reference_search = ctk.CTkFrame(safety, fg_color="transparent")
         reference_search.pack(fill="x", padx=PAD, pady=(0, 6))
         self.reference_search_var = tk.StringVar()
-        self.reference_search_entry = ctk.CTkEntry(
+        self.reference_search_entry = VisualEntry(
             reference_search, textvariable=self.reference_search_var,
             placeholder_text=I.t("openfda_search_placeholder"), height=FIELD_HEIGHT,
             border_color=LINE, font=_ui_font(14))
         self.reference_search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.reference_search_entry.bind("<Return>", self.lookup_openfda_search)
-        self.reference_search_button = ctk.CTkButton(
+        self.reference_search_button = VisualButton(
             reference_search, text=I.t("openfda_search_button"), width=90,
             height=ACTION_HEIGHT, fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             command=self.lookup_openfda_search)
         self.reference_search_button.pack(side="left")
         reference_actions = ctk.CTkFrame(safety, fg_color="transparent")
         reference_actions.pack(fill="x", padx=PAD, pady=(0, 6))
-        self.reference_lookup_button = ctk.CTkButton(
+        self.reference_lookup_button = VisualButton(
             reference_actions, text=I.t("lookup_current_medicines"), height=ACTION_HEIGHT, width=180,
             fg_color=CARD, text_color=ACCENT, border_width=1,
             border_color=LINE, hover_color=ACCENT_SOFT,
             command=self.lookup_openfda_labels)
         self.reference_lookup_button.pack(side="left")
-        self.reference_refresh_button = ctk.CTkButton(
+        self.reference_refresh_button = VisualButton(
             reference_actions, text=I.t("reference_refresh"), height=ACTION_HEIGHT, width=90,
             fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, command=self.refresh_openfda_labels)
         self.reference_refresh_button.pack(side="left", padx=5)
-        ctk.CTkButton(
+        VisualButton(
             reference_actions, text=I.t("reference_clear_cache"), height=ACTION_HEIGHT,
             width=100, fg_color="transparent", text_color=MUTED,
             hover_color=ACCENT_SOFT, command=self.clear_openfda_cache).pack(side="left")
@@ -2282,13 +2513,13 @@ class App(ctk.CTk):
         self.favorite_search_var = tk.StringVar()
         self.favorite_search_var.trace_add(
             "write", lambda *_: self._schedule_favorites_refresh())
-        ctk.CTkEntry(
+        VisualEntry(
             favorite_toolbar, textvariable=self.favorite_search_var,
             height=FIELD_HEIGHT, placeholder_text=I.t("favorite_search"),
             border_color=LINE, font=ctk.CTkFont(size=15)).pack(
                 side="left", fill="x", expand=True, padx=(0, 8))
         self.favorite_sort_var = tk.StringVar(value=I.t("favorite_sort_used"))
-        self.favorite_sort_menu = ctk.CTkOptionMenu(
+        self.favorite_sort_menu = VisualOptionMenu(
             favorite_toolbar,
             values=[I.t("favorite_sort_used"), I.t("favorite_sort_recent"),
                     I.t("favorite_sort_name"), I.t("favorite_sort_name_reverse")],
@@ -2297,11 +2528,12 @@ class App(ctk.CTk):
             button_hover_color=ACCENT_HOVER, font=ctk.CTkFont(size=13),
             command=lambda _value: self.refresh_favorites_page())
         self.favorite_sort_menu.pack(side="left", padx=(0, 5))
-        ctk.CTkButton(
+        VisualButton(
             favorite_toolbar, text=I.t("new_favorite"), width=125,
             height=ACTION_HEIGHT, fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             font=ctk.CTkFont(size=13),
             command=self.new_favorite).pack(side="left")
+        polish_toolbar(favorite_toolbar)
 
         self.favorite_category_var = tk.StringVar(value=I.t("all_categories"))
         self._favorite_selected_ids = set()
@@ -2320,7 +2552,7 @@ class App(ctk.CTk):
             self.favorite_notice, text="", text_color=WARNING, anchor="w",
             font=ctk.CTkFont(size=12, weight="bold"))
         self.favorite_notice_label.pack(side="left", fill="x", expand=True, padx=12, pady=8)
-        self.favorite_undo_button = ctk.CTkButton(
+        self.favorite_undo_button = VisualButton(
             self.favorite_notice, text=I.t("favorite_undo"), width=80, height=30,
             fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, command=self.undo_delete_favorite)
@@ -2340,7 +2572,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=18, weight="bold"), anchor="w")
         self.favorite_editor_title.grid(
             row=0, column=0, columnspan=3, sticky="ew", padx=14, pady=(12, 8))
-        ctk.CTkButton(
+        VisualButton(
             self.favorite_editor, text="×", width=34, height=30,
             fg_color="transparent", text_color=MUTED, hover_color=ACCENT_SOFT,
             command=self.close_favorite_editor).grid(
@@ -2363,7 +2595,7 @@ class App(ctk.CTk):
                 font=_ui_font(11)).grid(
                     row=row, column=column, sticky="ew", padx=6, pady=(2, 3))
             if values == "categories":
-                widget = ctk.CTkComboBox(
+                widget = VisualComboBox(
                     self.favorite_editor, values=[""],
                     variable=self.favorite_vars[key], height=FIELD_HEIGHT,
                     border_color=LINE, fg_color=CARD,
@@ -2373,7 +2605,7 @@ class App(ctk.CTk):
                     font=ctk.CTkFont(size=12))
                 self.favorite_category_combo = widget
             elif values:
-                widget = ctk.CTkComboBox(
+                widget = VisualComboBox(
                     self.favorite_editor, values=list(values),
                     variable=self.favorite_vars[key], height=FIELD_HEIGHT,
                     border_color=LINE, fg_color=CARD,
@@ -2382,7 +2614,7 @@ class App(ctk.CTk):
                     dropdown_text_color=TEXT, dropdown_font=_ui_font(16),
                     font=ctk.CTkFont(size=12))
             else:
-                widget = ctk.CTkEntry(
+                widget = VisualEntry(
                     self.favorite_editor, textvariable=self.favorite_vars[key],
                     height=FIELD_HEIGHT, border_color=LINE,
                     font=ctk.CTkFont(
@@ -2415,7 +2647,7 @@ class App(ctk.CTk):
             fg_color=CARD, text_color=TEXT, anchor="w", padx=12,
             font=ctk.CTkFont(size=14, weight="bold"))
         self.favorite_preview_label.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        ctk.CTkButton(
+        VisualButton(
             preview_row, text=I.t("save_changes"), width=130, height=42,
             fg_color=GOOD, hover_color=GOOD_HOVER,
             command=self.save_favorite_changes).grid(row=0, column=1)
@@ -2428,12 +2660,12 @@ class App(ctk.CTk):
             self.favorite_selection_bar, text="", text_color=ACCENT,
             font=ctk.CTkFont(size=12, weight="bold"))
         self.favorite_selection_label.pack(side="left", padx=10, pady=5)
-        ctk.CTkButton(
+        VisualButton(
             self.favorite_selection_bar, text=I.t("favorite_clear_selection"),
             width=72, height=28, fg_color="transparent", text_color=ACCENT,
             hover_color=LINE, command=self.clear_favorite_selection).pack(
                 side="right", padx=(3, 7), pady=4)
-        ctk.CTkButton(
+        VisualButton(
             self.favorite_selection_bar, text=I.t("favorite_add_selected"),
             width=130, height=28, fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             command=self.use_selected_favorites).pack(side="right", padx=3, pady=4)
@@ -2452,7 +2684,7 @@ class App(ctk.CTk):
         top.pack(fill="x", padx=PAD, pady=(10, 6))
         self.class_breadcrumb = ctk.CTkFrame(top, fg_color="transparent")
         self.class_breadcrumb.pack(side="left", fill="x", expand=True)
-        self.class_breadcrumb_group = ctk.CTkButton(
+        self.class_breadcrumb_group = VisualButton(
             self.class_breadcrumb, text="", height=30, width=40,
             fg_color="transparent", text_color=ACCENT,
             hover_color=ACCENT_SOFT, anchor="w",
@@ -2462,24 +2694,25 @@ class App(ctk.CTk):
             self.class_breadcrumb, text="›", width=22, text_color=MUTED,
             font=ctk.CTkFont(size=14, weight="bold"))
         self.class_breadcrumb_separator.pack(side="left")
-        self.class_breadcrumb_detail = ctk.CTkButton(
+        self.class_breadcrumb_detail = VisualButton(
             self.class_breadcrumb, text="", height=30, width=40,
             fg_color="transparent", text_color=ACCENT,
             hover_color=ACCENT_SOFT, anchor="w",
             font=ctk.CTkFont(size=13, weight="bold"))
         self.class_breadcrumb_detail.pack(side="left")
-        ctk.CTkButton(top, text=I.t("manage_class_mappings"), height=ACTION_HEIGHT, width=180,
+        VisualButton(top, text=I.t("manage_class_mappings"), height=ACTION_HEIGHT, width=180,
                       fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
                       hover_color=ACCENT_SOFT, command=self.show_class_mapping_editor).pack(
                           side="right", padx=(10, 0))
-        ctk.CTkButton(top, text=I.t("show_all_detailed_classes"), height=ACTION_HEIGHT, width=210,
+        VisualButton(top, text=I.t("show_all_detailed_classes"), height=ACTION_HEIGHT, width=210,
                       fg_color=CARD, text_color=ACCENT, border_width=1,
                       border_color=LINE, hover_color=ACCENT_SOFT,
                       command=self.show_all_detailed_classes).pack(side="right", padx=(10, 0))
+        polish_toolbar(top)
         self.class_search_var = tk.StringVar()
         self.class_search_var.trace_add(
             "write", lambda *_: self._schedule_class_browser_refresh())
-        ctk.CTkEntry(
+        VisualEntry(
             class_page, textvariable=self.class_search_var, height=FIELD_HEIGHT,
             placeholder_text=I.t("search_classes_medicines"),
             border_color=LINE, corner_radius=9).pack(
@@ -2533,7 +2766,7 @@ class App(ctk.CTk):
         self.class_count_badges = {}
         for code in classes.GROUPS:
             tile = ctk.CTkFrame(self.class_group_list, fg_color="transparent")
-            button = ctk.CTkButton(
+            button = VisualButton(
                 tile, text=I.t("class_" + code), height=ACTION_HEIGHT, corner_radius=9,
                 anchor="w", fg_color=SURFACE, text_color=TEXT,
                 border_width=1, border_color=LINE, hover_color=ACCENT_SOFT,
@@ -2572,13 +2805,13 @@ class App(ctk.CTk):
         self.page_header(page, I.t("treatment_templates"), "")
         navigation = ctk.CTkFrame(page, fg_color="transparent")
         navigation.pack(fill="x", padx=PAD, pady=(0, 6))
-        self.treatment_new_view_button = ctk.CTkButton(
+        self.treatment_new_view_button = VisualButton(
             navigation, text="＋ " + I.t("treatment_new_view"), width=150,
             height=ACTION_HEIGHT, fg_color=CARD, text_color=ACCENT,
             border_width=1, border_color=LINE, hover_color=ACCENT_SOFT,
             command=self.new_treatment_template)
         self.treatment_new_view_button.pack(side="left", padx=(0, 6))
-        self.treatment_saved_view_button = ctk.CTkButton(
+        self.treatment_saved_view_button = VisualButton(
             navigation, text=I.t("treatment_saved_view"),
             image=_dashboard_icon("treatment_templates"), compound="left",
             width=170, height=ACTION_HEIGHT, fg_color=ACCENT_SOFT,
@@ -2590,7 +2823,7 @@ class App(ctk.CTk):
 
         toolbar = ctk.CTkFrame(editor, fg_color="transparent")
         toolbar.pack(fill="x", padx=PAD, pady=(14, 7))
-        ctk.CTkButton(toolbar, text=I.t("back"), width=65, height=ACTION_HEIGHT,
+        VisualButton(toolbar, text=I.t("back"), width=65, height=ACTION_HEIGHT,
                       fg_color=CARD, text_color=ACCENT, border_width=1,
                       border_color=LINE, hover_color=ACCENT_SOFT,
                       command=self.show_treatment_saved_templates).pack(side="left", padx=(0, 7))
@@ -2599,7 +2832,7 @@ class App(ctk.CTk):
         self.treatment_disease_var = tk.StringVar()
         self.treatment_template_selector_var = tk.StringVar(
             value=I.t("treatment_select_template"))
-        self.treatment_template_selector = ctk.CTkComboBox(
+        self.treatment_template_selector = VisualComboBox(
             toolbar, values=[I.t("treatment_select_template")],
             variable=self.treatment_template_selector_var, width=280,
             height=ACTION_HEIGHT, fg_color=ACCENT_SOFT, text_color=ACCENT,
@@ -2620,23 +2853,24 @@ class App(ctk.CTk):
             "<FocusIn>", self._on_treatment_template_focus_in)
         self._treatment_template_popup = None
         self._treatment_template_suggestion_buttons = []
-        save_button = ctk.CTkButton(
+        save_button = VisualButton(
             toolbar, text="💾", width=ICON_BUTTON_SIZE, height=ICON_BUTTON_SIZE,
             fg_color="transparent", text_color=ACCENT, border_width=0,
             hover_color=ACCENT_SOFT,
             font=ctk.CTkFont(size=17), command=self.save_treatment_template)
         save_button.pack(side="left", padx=3)
-        self.treatment_delete_button = ctk.CTkButton(
+        self.treatment_delete_button = VisualButton(
             toolbar, text="🗑", width=ICON_BUTTON_SIZE,
             height=ICON_BUTTON_SIZE, fg_color="transparent", text_color=DANGER,
             border_width=0, hover_color=DANGER_SOFT,
             font=ctk.CTkFont(size=17),
             command=self.delete_treatment_template)
         self.treatment_delete_button.pack(side="left", padx=3)
-        ctk.CTkButton(
+        VisualButton(
             toolbar, text=I.t("treatment_use_rx"), width=105,
             height=ACTION_HEIGHT, fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             command=self.use_treatment_template).pack(side="right")
+        polish_toolbar(toolbar)
 
         search_row = ctk.CTkFrame(editor, fg_color="transparent")
         search_row.pack(fill="x", padx=PAD, pady=(0, 5))
@@ -2647,7 +2881,7 @@ class App(ctk.CTk):
         self.treatment_drug_search_var = tk.StringVar()
         self.treatment_drug_search_var.trace_add(
             "write", lambda *_: self._schedule_treatment_drug_search())
-        self.treatment_drug_search_entry = ctk.CTkEntry(
+        self.treatment_drug_search_entry = VisualEntry(
             search_row, textvariable=self.treatment_drug_search_var,
             height=FIELD_HEIGHT, border_color=LINE, corner_radius=9,
             placeholder_text=I.t("treatment_search_database"),
@@ -2692,7 +2926,7 @@ class App(ctk.CTk):
         self.treatment_saved_search_var = tk.StringVar()
         self.treatment_saved_search_var.trace_add(
             "write", lambda *_: self.refresh_saved_treatment_templates())
-        ctk.CTkEntry(
+        VisualEntry(
             self.treatment_saved_view, textvariable=self.treatment_saved_search_var,
             placeholder_text=I.t("treatment_saved_search"), height=FIELD_HEIGHT,
             border_color=LINE).pack(fill="x", padx=PAD, pady=(10, 6))
@@ -2798,12 +3032,12 @@ class App(ctk.CTk):
                      lambda item=template: self.edit_saved_treatment_template(item)),
                     ("🗑", None,
                      lambda item=template: self.delete_saved_treatment_template(item))):
-                button = ctk.CTkButton(actions, text=symbol, image=image, width=30, height=30,
+                button = VisualButton(actions, text=symbol, image=image, width=30, height=30,
                                        fg_color="transparent", border_width=0,
                                        text_color=DANGER if symbol == "🗑" else ACCENT,
                                        hover_color=ACCENT_SOFT, font=_ui_font(18), command=command)
                 button.pack(side="left", padx=2)
-            ctk.CTkButton(header, text=directional_display_text(I.t(
+            VisualButton(header, text=directional_display_text(I.t(
                 "treatment_template_option", disease=template["disease"], n=len(template["medications"]))),
                 height=32, anchor="w", fg_color="transparent", text_color=TEXT,
                 hover_color=ACCENT_SOFT, font=_ui_font(14, "bold"),
@@ -2823,7 +3057,7 @@ class App(ctk.CTk):
                     label.bind("<Configure>", lambda event, target=label:
                                target.configure(wraplength=max(100, event.width - 10)))
         if len(matches) > limit:
-            ctk.CTkButton(self.treatment_saved_cards, text=I.t("load_more"), width=110,
+            VisualButton(self.treatment_saved_cards, text=I.t("load_more"), width=110,
                           height=32, command=self._load_more_saved_treatments).pack(anchor="w", pady=5)
 
     def _load_more_saved_treatments(self):
@@ -2956,11 +3190,11 @@ class App(ctk.CTk):
                 scrollbar_button_hover_color=ACCENT_HOVER)
             container.pack(fill="both", expand=True, padx=3, pady=3)
         for index, label in enumerate(matches):
-            button = ctk.CTkButton(
+            button = VisualButton(
                 container, text=directional_display_text(label), height=46,
                 corner_radius=5, fg_color="transparent", text_color=TEXT,
                 hover_color=ACCENT_SOFT, anchor="w",
-                font=ctk.CTkFont(size=18),
+                font=dropdown_font(_ui_font(18)),
                 command=lambda value=label: self._choose_treatment_template(value))
             bottom_inset = 4 if index == len(matches) - 1 else 0
             button.pack(fill="x", padx=4, pady=(4, bottom_inset))
@@ -3127,7 +3361,7 @@ class App(ctk.CTk):
             brand = drug.brand_name.strip() or drug.generic_name.strip()
             scientific = drug.generic_name.strip() if drug.brand_name.strip() else ""
             text = brand + (f"  ·  {scientific}" if scientific else "")
-            ctk.CTkButton(
+            VisualButton(
                 self.treatment_drug_results, text="+  " + text, height=32,
                 fg_color="transparent", text_color=TEXT, anchor="w",
                 hover_color=ACCENT_SOFT,
@@ -3219,22 +3453,22 @@ class App(ctk.CTk):
 
             actions = ctk.CTkFrame(header, fg_color="transparent")
             actions.pack(side="right")
-            ctk.CTkButton(
+            VisualButton(
                 actions, text=I.t("treatment_remove"), width=68, height=27,
                 fg_color="transparent", text_color=DANGER, hover_color=DANGER_SOFT,
                 command=lambda position=index: self.remove_treatment_drug(position)).pack(
                     side="right", padx=(4, 0))
-            ctk.CTkButton(
+            VisualButton(
                 actions, text="↓", width=30, height=27, fg_color="transparent",
                 text_color=ACCENT, hover_color=ACCENT_SOFT,
                 command=lambda position=index: self.move_treatment_drug(position, 1)).pack(
                     side="right", padx=2)
-            ctk.CTkButton(
+            VisualButton(
                 actions, text="↑", width=30, height=27, fg_color="transparent",
                 text_color=ACCENT, hover_color=ACCENT_SOFT,
                 command=lambda position=index: self.move_treatment_drug(position, -1)).pack(
                     side="right", padx=2)
-            treatment_edit_button = ctk.CTkButton(
+            treatment_edit_button = VisualButton(
                 actions, text="", image=_edit_icon(18), width=30, height=27,
                 fg_color="transparent", text_color=ACCENT,
                 border_width=0, hover_color=ACCENT_SOFT,
@@ -3288,7 +3522,7 @@ class App(ctk.CTk):
                     "write", lambda *_args, item=medicine, field=key, var=variable:
                     self._update_treatment_drug_field(item, field, var))
                 variables[key] = variable
-                ctk.CTkEntry(
+                VisualEntry(
                     column_frame, textvariable=variable, height=36, corner_radius=8,
                     border_color=LINE,
                     font=ctk.CTkFont(size=13, weight="bold" if key == "brand_name" else "normal")
@@ -3317,7 +3551,7 @@ class App(ctk.CTk):
                 binding = DirectionalTextBinding(self, variable)
                 self._treatment_template_bindings.append(binding)
                 if options:
-                    widget = ctk.CTkComboBox(
+                    widget = VisualComboBox(
                         column_frame,
                         values=[directional_display_text(value) for value in options],
                         variable=binding.display_var, height=34, corner_radius=8,
@@ -3327,7 +3561,7 @@ class App(ctk.CTk):
                         font=ctk.CTkFont(size=12),
                         dropdown_font=ctk.CTkFont(size=12), justify="left")
                 else:
-                    widget = ctk.CTkEntry(
+                    widget = VisualEntry(
                         column_frame, textvariable=binding.display_var,
                         height=34, corner_radius=8, border_color=LINE,
                         font=ctk.CTkFont(size=12), justify="left")
@@ -3716,16 +3950,16 @@ class App(ctk.CTk):
                             fill="x", padx=2, pady=2)
         actions = ctk.CTkFrame(dialog, fg_color="transparent")
         actions.pack(fill="x", padx=18, pady=(0, 14))
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("settings_cancel"), width=90, height=ACTION_HEIGHT,
             fg_color=CARD, text_color=MUTED, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, command=dialog.destroy).pack(side="left")
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("treatment_add_current"), width=150,
             height=ACTION_HEIGHT, fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             command=lambda: self._apply_treatment_selection(
                 selections, False, dialog)).pack(side="right", padx=(6, 0))
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("treatment_replace_current"), width=165,
             height=ACTION_HEIGHT, fg_color=CARD, text_color=ACCENT,
             border_width=1, border_color=LINE, hover_color=ACCENT_SOFT,
@@ -3857,7 +4091,7 @@ class App(ctk.CTk):
             line.grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=4)
             result_row.bind("<Configure>", lambda event, target=line, full=text:
                             self.fit_starred_medicine_line(target, full, event.width - 54))
-            add_button = ctk.CTkButton(
+            add_button = VisualButton(
                 result_row, text="+", width=30, height=30,
                 fg_color="transparent", text_color=ACCENT, hover_color=ACCENT_SOFT,
                 font=_ui_font(22), border_width=0,
@@ -4055,7 +4289,7 @@ class App(ctk.CTk):
                     self._favorite_more_frame,
                     text=I.t("more_class_medicines", n=remaining),
                     text_color=MUTED).pack(side="left", padx=(4, 10))
-                ctk.CTkButton(
+                VisualButton(
                     self._favorite_more_frame, text=I.t("load_more"),
                     width=110, height=32, fg_color=PRIMARY,
                     hover_color=ACCENT_HOVER,
@@ -4163,7 +4397,7 @@ class App(ctk.CTk):
             pack_side = "right" if I.LANG == "ar" else "left"
             for category, button_width in row_values:
                 active = category == selected
-                ctk.CTkButton(
+                VisualButton(
                     row_frame, text=category, width=button_width,
                     height=26, corner_radius=13,
                     fg_color=PRIMARY if active else ACCENT_SOFT,
@@ -4314,7 +4548,7 @@ class App(ctk.CTk):
         self._favorite_ac_matches = matches
         self._favorite_ac_mode = mode
         self._favorite_ac_index = 0
-        listbox = tk.Listbox(
+        listbox = PopupListbox(
             top, height=min(10, len(matches)), font=LIST_FONT,
             bg=CARD, fg=TEXT, relief="flat", borderwidth=0,
             activestyle="none", highlightthickness=1,
@@ -4475,7 +4709,7 @@ class App(ctk.CTk):
                         row=1, column=0, sticky="ew", padx=8, pady=(1, 3))
             actions = ctk.CTkFrame(card, fg_color="transparent")
             actions.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 5))
-            add_button = ctk.CTkButton(
+            add_button = VisualButton(
                 actions, text="+", width=28, height=28,
                 fg_color="transparent", text_color=ACCENT, hover_color=ACCENT_SOFT,
                 border_width=0, font=_ui_font(22),
@@ -4489,19 +4723,19 @@ class App(ctk.CTk):
                 command=lambda item_id=favorite_id, variable=selected_var,
                 target=card: self._toggle_favorite_selection(
                     item_id, variable, target)).pack(side="left", padx=(5, 2))
-            edit_button = ctk.CTkButton(
+            edit_button = VisualButton(
                 actions, text="", image=_edit_icon(18), width=28, height=28,
                 fg_color="transparent", text_color=ACCENT, border_width=0,
                 hover_color=ACCENT_SOFT, font=ctk.CTkFont(size=15, weight="bold"),
                 command=lambda item_id=favorite_id: self.edit_favorite(item_id))
             edit_button.pack(side="left", padx=2)
-            delete_button = ctk.CTkButton(
+            delete_button = VisualButton(
                 actions, text="🗑", width=28, height=28,
                 fg_color="transparent", text_color=DANGER, border_width=0,
                 hover_color=DANGER_SOFT, font=ctk.CTkFont(size=15),
                 command=lambda item_id=favorite_id: self.delete_favorite(item_id))
             delete_button.pack(side="left", padx=2)
-            star_button = ctk.CTkButton(
+            star_button = VisualButton(
                 actions, text="★" if favorite.get("pinned") else "☆",
                 width=28, height=28, fg_color="transparent",
                 text_color=ICON_BLUE, border_width=0, hover_color=ACCENT_SOFT,
@@ -4857,7 +5091,7 @@ class App(ctk.CTk):
             self.class_unclassified_more_frame,
             text=I.t("more_class_medicines", n=remaining),
             text_color=MUTED, anchor="w").pack(side="left", padx=(4, 10))
-        ctk.CTkButton(
+        VisualButton(
             self.class_unclassified_more_frame, text=I.t("load_more"),
             width=110, height=32, fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             command=self._append_unclassified_class_search_page).pack(side="left")
@@ -4889,13 +5123,13 @@ class App(ctk.CTk):
             corner_radius=11, fg_color=WARNING_SOFT, text_color=WARNING,
             font=_ui_font(9, "bold")).pack(
                 side="left", padx=(8, 0))
-        ctk.CTkButton(
+        VisualButton(
             card, text=I.t("favorite_use_rx"), width=82, height=30,
             fg_color=CARD, text_color=ACCENT, border_width=1,
             border_color=LINE, hover_color=ACCENT_SOFT,
             command=lambda item=drug: self.add_drug_database_item(item)).grid(
                 row=0, column=1, padx=(2, 4), pady=5)
-        ctk.CTkButton(
+        VisualButton(
             card, text="★" if self._class_drug_is_starred(drug) else "☆",
             width=34, height=30, fg_color="transparent", text_color=ACCENT,
             hover_color=ACCENT_SOFT,
@@ -5132,7 +5366,7 @@ class App(ctk.CTk):
         for detail in visible_details:
             count = len(self._drugs_in_class(code, detail))
             selected = detail == self._selected_detailed_class
-            button = ctk.CTkButton(
+            button = VisualButton(
                 self.class_detail_list,
                 text=I.t("detailed_class_with_count", detail=detail, n=count),
                 height=34, corner_radius=8, anchor="w",
@@ -5176,7 +5410,7 @@ class App(ctk.CTk):
         bind_tree(widget)
 
     def show_class_medicine_context_menu(self, event, drug):
-        menu = tk.Menu(self, tearoff=False, font=("Segoe UI", 44))
+        menu = VisualMenu(self, tearoff=False, font=("Segoe UI", 44))
         menu.add_command(
             label=I.t("context_use_rx"),
             command=lambda: self.add_drug_database_item(drug))
@@ -5279,7 +5513,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(bar, text=I.t("class_mapping_editor"), text_color=ACCENT,
                      font=ctk.CTkFont(size=16, weight="bold"), anchor="w").pack(
                          side="left", padx=(0, 8))
-        ctk.CTkButton(bar, text="← " + I.t("back"), height=ACTION_HEIGHT,
+        VisualButton(bar, text="← " + I.t("back"), height=ACTION_HEIGHT,
                       width=86, fg_color=CARD, text_color=ACCENT,
                       border_width=1, border_color=LINE, hover_color=ACCENT_SOFT,
                       command=self.back_to_major_groups).pack(side="left")
@@ -5297,7 +5531,7 @@ class App(ctk.CTk):
         self._mapping_search_job = None
         self.mapping_search_var.trace_add("write", lambda *_: self._schedule_mapping_refresh())
         mapping_control_font = ctk.CTkFont(size=13)
-        ctk.CTkEntry(
+        VisualEntry(
             left, textvariable=self.mapping_search_var, height=FIELD_HEIGHT,
             placeholder_text=I.t("search_medicines"), border_width=2,
             border_color=ACCENT, corner_radius=9,
@@ -5336,17 +5570,17 @@ class App(ctk.CTk):
             review_actions, text="", text_color=MUTED,
             font=ctk.CTkFont(size=10), anchor="w")
         self.mapping_result_label.pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
+        VisualButton(
             review_actions, text=I.t("previous"), width=92, height=32,
             fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, command=lambda: self.mapping_select_relative(-1)).pack(
                 side="left", padx=(0, 4))
-        ctk.CTkButton(
+        VisualButton(
             review_actions, text=I.t("skip"), width=78, height=32,
             fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, command=lambda: self.mapping_select_relative(1)).pack(
                 side="left", padx=4)
-        ctk.CTkButton(
+        VisualButton(
             review_actions, text=I.t("save_and_next"), width=130, height=32,
             fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             command=self.mapping_save_and_next).pack(side="right")
@@ -5354,7 +5588,7 @@ class App(ctk.CTk):
                                      if classes.subclasses_for(code)}
         self.mapping_group_var = tk.StringVar(value=I.t("choose_major_group"))
         self.mapping_detail_var = tk.StringVar(value=I.t("choose_detailed_class"))
-        ctk.CTkButton(
+        VisualButton(
             right, text=I.t("mapping_integrity"), width=150, height=34,
             fg_color=CARD, text_color=ACCENT, border_width=1,
             border_color=LINE, hover_color=ACCENT_SOFT,
@@ -5368,7 +5602,7 @@ class App(ctk.CTk):
         self.mapping_selected_label.pack(fill="x", padx=12, pady=(10, 8))
         ctk.CTkLabel(right, text=I.t("major_therapeutic_group"), text_color=MUTED,
                      font=ctk.CTkFont(size=10, weight="bold"), anchor="w").pack(fill="x", padx=12)
-        self.mapping_group_menu = ctk.CTkOptionMenu(
+        self.mapping_group_menu = VisualOptionMenu(
             right, values=[I.t("choose_major_group")] + list(self.mapping_group_labels),
             variable=self.mapping_group_var, height=FIELD_HEIGHT,
             corner_radius=9, font=mapping_control_font,
@@ -5384,7 +5618,7 @@ class App(ctk.CTk):
             self.mapping_detail_shell, text=I.t("detailed_drug_class"), text_color=MUTED,
             font=ctk.CTkFont(size=10, weight="bold"), anchor="w")
         self.mapping_detail_label.pack(fill="x", pady=(0, 3))
-        self.mapping_detail_menu = ctk.CTkOptionMenu(
+        self.mapping_detail_menu = VisualOptionMenu(
             self.mapping_detail_shell, values=[I.t("choose_detailed_class")],
             variable=self.mapping_detail_var, height=FIELD_HEIGHT,
             corner_radius=9, font=mapping_control_font,
@@ -5401,14 +5635,14 @@ class App(ctk.CTk):
         self.mapping_keep_existing_checkbox.pack(fill="x", padx=12, pady=(0, 6))
         mapping_actions = ctk.CTkFrame(right, fg_color="transparent")
         mapping_actions.pack(fill="x", padx=12)
-        self.add_mapping_drug_button = ctk.CTkButton(
+        self.add_mapping_drug_button = VisualButton(
             mapping_actions, text=I.t("add_drug_to_class"), height=34,
             fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, state="disabled",
                                                       command=self.add_drug_to_class)
         self.add_mapping_drug_button.pack(
             side="left", fill="x", expand=True, padx=(0, 3))
-        self.save_mapping_button = ctk.CTkButton(
+        self.save_mapping_button = VisualButton(
             mapping_actions, text=I.t("save_changes"), height=34,
             fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             state="disabled", command=self.save_class_mapping)
@@ -5638,14 +5872,14 @@ class App(ctk.CTk):
         toolbar = ctk.CTkFrame(card, fg_color="transparent")
         toolbar.pack(fill="x", padx=2, pady=(0, 5))
         toolbar.grid_columnconfigure((1, 2), weight=1, uniform="all_class_toolbar")
-        ctk.CTkButton(
+        VisualButton(
             toolbar, text="← " + I.t("back"), height=ACTION_HEIGHT,
             width=86, fg_color=CARD, text_color=ACCENT,
             border_width=1, border_color=LINE, hover_color=ACCENT_SOFT,
             command=self.back_to_major_groups).grid(row=0, column=0, sticky="w")
         self.all_class_search_var = tk.StringVar()
         self.all_class_search_var.trace_add("write", lambda *_: self.render_all_detailed_classes())
-        ctk.CTkEntry(
+        VisualEntry(
             toolbar, textvariable=self.all_class_search_var, height=FIELD_HEIGHT,
             placeholder_text=I.t("search_detailed_classes"),
             border_color=LINE).grid(row=0, column=1, sticky="ew", padx=(6, 3))
@@ -5681,7 +5915,7 @@ class App(ctk.CTk):
             grid.pack(fill="x")
             grid.grid_columnconfigure((0, 1), weight=1, uniform="detailed_classes")
             for index, detail in enumerate(details):
-                ctk.CTkButton(
+                VisualButton(
                     grid, text=detail, height=33, corner_radius=8, anchor="w",
                     fg_color=SURFACE, text_color=TEXT, border_width=1,
                     border_color=LINE, hover_color=ACCENT_SOFT,
@@ -5703,13 +5937,13 @@ class App(ctk.CTk):
         card = self.section(self.class_subpage, "")
         bar = ctk.CTkFrame(card, fg_color="transparent")
         bar.pack(fill="x", padx=PAD, pady=(0, 8))
-        ctk.CTkButton(bar, text="← " + I.t("back"), height=ACTION_HEIGHT,
+        VisualButton(bar, text="← " + I.t("back"), height=ACTION_HEIGHT,
                       width=86, fg_color=CARD, text_color=ACCENT,
                       border_width=1, border_color=LINE, hover_color=ACCENT_SOFT,
                       command=self.back_from_subclass_page).pack(side="left")
         trail = ctk.CTkFrame(bar, fg_color="transparent")
         trail.pack(side="left", padx=(8, 0))
-        ctk.CTkButton(
+        VisualButton(
             trail, text=I.t("major_therapeutic_groups"), height=34, width=40,
             fg_color="transparent", text_color=ACCENT, hover_color=ACCENT_SOFT,
             font=ctk.CTkFont(size=14, weight="bold"),
@@ -5727,7 +5961,7 @@ class App(ctk.CTk):
         for detail in classes.subclasses_for(group_code):
             subclass_counts[detail] = len(self._drugs_in_class(group_code, detail))
         for detail in classes.subclasses_for(group_code):
-            button = ctk.CTkButton(
+            button = VisualButton(
                 list_frame, text=I.t("detailed_class_with_count", detail=detail,
                                      n=subclass_counts[detail]), height=36, corner_radius=9, anchor="w",
                 fg_color=SURFACE, text_color=TEXT, border_width=1,
@@ -5790,14 +6024,14 @@ class App(ctk.CTk):
         bar = ctk.CTkFrame(card, fg_color="transparent")
         bar.pack(fill="x", padx=PAD, pady=(0, 10))
         self._detail_page_bar = bar
-        ctk.CTkButton(
+        VisualButton(
             bar, text="← " + I.t("back"),
             height=ACTION_HEIGHT, width=86, fg_color=CARD, text_color=ACCENT,
             border_width=1, border_color=LINE, hover_color=ACCENT_SOFT,
             command=self.back_to_major_groups).pack(side="left")
         trail = ctk.CTkFrame(bar, fg_color="transparent")
         trail.pack(side="left", padx=(8, 0))
-        ctk.CTkButton(
+        VisualButton(
             trail, text=I.t("class_" + group_code), height=34, width=40,
             fg_color="transparent", text_color=ACCENT, hover_color=ACCENT_SOFT,
             font=ctk.CTkFont(size=16, weight="bold"),
@@ -5808,9 +6042,10 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             trail, text=detail, text_color=ACCENT, anchor="e",
             font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
-        add_button = ctk.CTkButton(
+        add_button = VisualButton(
             bar, text="+", width=34, height=34, corner_radius=17,
-            fg_color=PRIMARY, hover_color=ACCENT_HOVER,
+            fg_color=SURFACE, text_color=ACCENT, hover_color=ACCENT_SOFT,
+            border_width=1, border_color=LINE,
             font=ctk.CTkFont(size=20, weight="bold"),
             command=self.toggle_detail_drug_creator)
         add_button.pack(side="right")
@@ -5823,7 +6058,7 @@ class App(ctk.CTk):
             self.detail_drug_creator, text=I.t("drug_name"),
             text_color=MUTED, font=ctk.CTkFont(size=11, weight="bold")).pack(
                 side="left", padx=(10, 5), pady=7)
-        self.detail_drug_name_entry = ctk.CTkEntry(
+        self.detail_drug_name_entry = VisualEntry(
             self.detail_drug_creator, textvariable=self.detail_drug_name_var,
             width=360, height=36, border_color=ACCENT,
             placeholder_text=I.t("class_add_drug_placeholder"))
@@ -5832,7 +6067,7 @@ class App(ctk.CTk):
         self.detail_drug_name_entry.bind(
             "<Return>", lambda _event: self.save_detail_class_medicine(
                 group_code, detail))
-        ctk.CTkButton(
+        VisualButton(
             self.detail_drug_creator, text=I.t("save"), width=80, height=34,
             fg_color=GOOD, hover_color=GOOD_HOVER,
             command=lambda: self.save_detail_class_medicine(
@@ -5910,7 +6145,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             footer, text=I.t("more_class_medicines", n=remaining),
             text_color=MUTED).pack(side="left", padx=(4, 10))
-        ctk.CTkButton(
+        VisualButton(
             footer, text=I.t("load_more"), width=110, height=32,
             fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             command=self._append_detail_medicine_page).pack(side="left")
@@ -5938,28 +6173,28 @@ class App(ctk.CTk):
             text_color=status_foreground,
             font=_ui_font(9, "bold")).pack(
                 side="left", padx=(8, 0))
-        delete_button = ctk.CTkButton(
+        delete_button = VisualButton(
             row, text="🗑", width=32, height=32,
             fg_color="transparent", text_color=DANGER, border_width=0,
             hover_color=DANGER_SOFT, font=_ui_font(14),
             command=lambda item=drug, group=group_code, picked=detail:
                 self.delete_detail_class_drug(item, group, picked))
         delete_button.pack(side="right", padx=(2, 7), pady=5)
-        ctk.CTkButton(
+        VisualButton(
             row, text="★" if self._class_drug_is_starred(drug) else "☆",
             width=36, height=32, fg_color="transparent", text_color=ACCENT,
             hover_color=ACCENT_SOFT,
             command=lambda item=drug, group=group_code, picked=detail:
                 self.toggle_detail_drug_star(item, group, picked)).pack(
                     side="right", padx=(2, 7), pady=5)
-        ctk.CTkButton(
+        VisualButton(
             row, text="", image=_edit_icon(20), width=32, height=32, corner_radius=8,
             fg_color="transparent", text_color=ACCENT,
             border_width=0, hover_color=ACCENT_SOFT,
             font=_ui_font(14, "bold"),
             command=lambda item=drug: self.edit_class_drug_mapping(item)).pack(
                 side="right", padx=2, pady=5)
-        add_button = ctk.CTkButton(
+        add_button = VisualButton(
             row, text="+", width=32, height=32,
             fg_color="transparent", text_color=ACCENT, border_width=0,
             hover_color=ACCENT_SOFT, font=_ui_font(22),
@@ -6301,7 +6536,7 @@ class App(ctk.CTk):
             prescription_id = str(prescription.get("id", ""))
             expanded = prescription_id in self._expanded_prescription_ids
             arrow = "▾" if expanded else "▸"
-            ctk.CTkButton(
+            VisualButton(
                 card,
                 text=(f"{arrow}  {I.t('last_prescription', date=saved_at or '—')}"
                       f"  ·  {I.t('medicine_count', n=len(drugs))}"),
@@ -6330,13 +6565,13 @@ class App(ctk.CTk):
                     wraplength=720).pack(fill="x", pady=2)
             actions = ctk.CTkFrame(details, fg_color="transparent")
             actions.pack(fill="x", pady=(5, 0))
-            ctk.CTkButton(
+            VisualButton(
                 actions, text=I.t("load_rx"), width=100, height=32,
                 fg_color=CARD, text_color=ACCENT, border_width=1,
                 border_color=LINE, hover_color=ACCENT_SOFT,
                 command=lambda item=prescription, patient=record:
                     self.load_saved_prescription(patient, item)).pack(side="left")
-            ctk.CTkButton(
+            VisualButton(
                 actions, text=I.t("delete_rx"), width=90, height=32,
                 fg_color="transparent", text_color=DANGER, hover_color=DANGER_SOFT,
                 command=lambda item=prescription, patient=record:
@@ -6704,7 +6939,7 @@ class App(ctk.CTk):
                 expanded = not expanded
                 content.configure(text=value if expanded else preview)
                 expand_button.configure(text=I.t("reference_collapse" if expanded else "reference_expand"))
-            expand_button = ctk.CTkButton(
+            expand_button = VisualButton(
                 line, text=I.t("reference_expand"), height=26, width=120,
                 fg_color="transparent", text_color=foreground,
                 hover_color=background, font=_ui_font(11), command=toggle)
@@ -6795,7 +7030,7 @@ class App(ctk.CTk):
                 metadata.append(I.t("reference_checked", date=checked_at[:10]))
             header = ctk.CTkFrame(card, fg_color="transparent")
             header.pack(fill="x", padx=12, pady=(8, 5))
-            ctk.CTkButton(header, text=I.t("reference_full_label"), height=28, width=130,
+            VisualButton(header, text=I.t("reference_full_label"), height=28, width=130,
                           fg_color="transparent", text_color=ACCENT,
                           hover_color=ACCENT_SOFT,
                           command=lambda item=reference: self.open_full_drug_label(item)).pack(side="right", padx=(8, 0))
@@ -6844,7 +7079,7 @@ class App(ctk.CTk):
                          fill="x", padx=18, pady=(16, 7))
         search_var = tk.StringVar()
         self.reference_full_label_search_var = search_var
-        search = ctk.CTkEntry(window, textvariable=search_var,
+        search = VisualEntry(window, textvariable=search_var,
                               placeholder_text=I.t("reference_search_full_label"),
                               height=FIELD_HEIGHT, border_color=LINE)
         search.pack(fill="x", padx=18, pady=(0, 8))
@@ -7101,19 +7336,19 @@ class App(ctk.CTk):
         actions = ctk.CTkFrame(window, fg_color="transparent")
         actions.pack(fill="x", padx=22, pady=18)
         if report.get("unclassified"):
-            ctk.CTkButton(
+            VisualButton(
                 actions, text=I.t("review_unclassified"), height=ACTION_HEIGHT,
                 fg_color=PRIMARY, hover_color=ACCENT_HOVER,
                 command=lambda: (window.destroy(),
                                  self.show_page("drug_classes"),
                                  self.show_class_mapping_editor(True))).pack(side="left")
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("manage_class_mappings"), height=ACTION_HEIGHT,
             fg_color=CARD, text_color=ACCENT, border_width=1,
             border_color=LINE, hover_color=ACCENT_SOFT,
             command=lambda: (window.destroy(), self.show_page("drug_classes"),
                              self.show_class_mapping_editor())).pack(side="left", padx=8)
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("close"), height=ACTION_HEIGHT, width=90,
             fg_color=ACCENT_SOFT, text_color=ACCENT, hover_color=LINE,
             command=window.destroy).pack(side="right")
@@ -7251,7 +7486,8 @@ class App(ctk.CTk):
                         **options)
                 if path_docx:
                     pdfgen.generate_prescription_docx(
-                        rx, path_docx, qr_pil_image=qr, **options)
+                        rx, path_docx, qr_pil_image=qr,
+                        paper_size=document.get("_paper_size", "A4"), **options)
             finally:
                 I.set_lang(previous_language)
 
@@ -7346,17 +7582,35 @@ class App(ctk.CTk):
             except Exception:
                 webbrowser.open(path)
 
+        paper_size = self.paper_var.get()
         self.submit_background(
             lambda: pdfgen.generate_medication_label_docx(
-                rx, path, qr_pil_image=qr),
+                rx, path, qr_pil_image=qr, paper_size=paper_size),
             finished, label=I.t("export_compact") + "…")
 
     def open_settings(self):
         SettingsWindow(self)
 
+    def apply_ui_font_preferences(self):
+        """Update existing controls without rebuilding pages or losing edits."""
+        pending = [self]
+        while pending:
+            widget = pending.pop()
+            if isinstance(widget, (VisualComboBox, VisualOptionMenu, PopupListbox, VisualMenu)):
+                widget.apply_preferences()
+            pending.extend(widget.winfo_children())
+        patient_size = cfg.config.ui_font_size("patient_name_font_size")
+        self.patient_name_entry.configure(font=_ui_font(patient_size), height=max(FIELD_HEIGHT, patient_size + 12))
+        self._hide_quick_results()
+        self._hide_treatment_template_suggestions()
+        for row in self.rows:
+            row._hide_ac()
+
 
 class SettingsWindow(ctk.CTkToplevel):
     """Organized application settings with category navigation and one save flow."""
+
+    _fixed_dropdown_fonts = True
 
     SECTIONS = (
         ("general", "⚒", "General"),
@@ -7398,6 +7652,9 @@ class SettingsWindow(ctk.CTkToplevel):
         self.paper_var = tk.StringVar(value=cfg.config.paper_size)
         self.language_var = tk.StringVar(
             value="العربية" if cfg.config.language == "ar" else "English")
+        dropdown_size = cfg.config.ui_font_size("dropdown_font_size")
+        self.dropdown_font_var = tk.StringVar(value=str(dropdown_size) if dropdown_size else I.t("settings_font_default"))
+        self.patient_font_var = tk.StringVar(value=str(cfg.config.ui_font_size("patient_name_font_size")))
         self.gemini_enabled_var = tk.BooleanVar(value=cfg.config.gemini_enabled)
         self.gemini_key_var = tk.StringVar(value=cfg.config.gemini_api_key)
         document = cfg.config.get("document_defaults", {})
@@ -7429,6 +7686,7 @@ class SettingsWindow(ctk.CTkToplevel):
             self.language_var, self.gemini_enabled_var, self.gemini_key_var,
             self.document_language_var, self.document_header_var,
             self.export_folder_var, self.auto_backup_var,
+            self.dropdown_font_var, self.patient_font_var,
         )
         self._saved_snapshot = self._snapshot()
         for variable in self._tracked_variables:
@@ -7447,15 +7705,17 @@ class SettingsWindow(ctk.CTkToplevel):
         workspace.grid_columnconfigure(1, weight=1)
 
         self.sidebar = GlassFrame(
-            workspace, glass_surface="sidebar", width=240, fg_color=SIDEBAR_SURFACE,
+            workspace, glass_surface="sidebar", width=218, fg_color=SIDEBAR_SURFACE,
             border_color=LINE, border_width=1, corner_radius=12)
         self.sidebar.grid(row=0, column=0, sticky="nsw", padx=(0, 1))
         self.sidebar.grid_propagate(False)
-        self.settings_search_entry = ctk.CTkEntry(
+        self.settings_search_entry = VisualEntry(
             self.sidebar, textvariable=self.settings_search_var, height=FIELD_HEIGHT,
             placeholder_text=I.t("settings_search"), border_color=LINE,
             corner_radius=9, font=ctk.CTkFont(size=13))
         self.settings_search_entry.pack(fill="x", padx=12, pady=(10, 5))
+        attach_search_hint(self.settings_search_entry, self.settings_search_var,
+                           I.t("settings_search"))
         self.settings_search_var.trace_add(
             "write", lambda *_: self._filter_settings_sections())
         for key, _symbol, _label in self.SECTIONS:
@@ -7465,7 +7725,7 @@ class SettingsWindow(ctk.CTkToplevel):
             row.pack(fill="x", padx=8, pady=1)
             indicator = ctk.CTkFrame(row, width=3, height=22, corner_radius=1,
                                      fg_color=NAV_ACTIVE)
-            button = ctk.CTkButton(
+            button = VisualButton(
                 row,
                 text=I.t('settings_' + key) if key != 'security' else I.t('settings_backup_security'),
                 image=icons[0], compound="left",
@@ -7486,52 +7746,54 @@ class SettingsWindow(ctk.CTkToplevel):
                 side="bottom", fill="x", padx=22, pady=12)
 
         self.content_host = GlassFrame(
-            workspace, fg_color=CARD, corner_radius=10, border_width=0,
+            workspace, glass_surface="sheet", fg_color=SURFACE, corner_radius=10, border_width=0,
             border_color=LINE)
-        self.content_host.grid(row=0, column=1, sticky="nsew", padx=12, pady=10)
+        self.content_host.grid(row=0, column=1, sticky="nsew", padx=8, pady=8)
         self.content_host.grid_rowconfigure(0, weight=1)
         self.content_host.grid_columnconfigure(0, weight=1)
 
     def _build_footer(self):
-        footer = GlassFrame(self, height=82, fg_color=CARD, corner_radius=0,
+        footer = GlassFrame(self, glass_surface="sheet", height=66, fg_color=SURFACE, corner_radius=0,
                               border_width=0)
         footer.grid(row=1, column=0, sticky="ew")
         footer.grid_propagate(False)
         footer.pack_propagate(False)
         self._settings_footer = footer
-        row = ctk.CTkFrame(footer, fg_color=CARD, corner_radius=0)
-        row.pack(fill="x", pady=(10, 32))
+        row = ctk.CTkFrame(footer, fg_color="transparent", corner_radius=0)
+        row.pack(fill="x", pady=(10, 16))
         self._settings_footer_row = row
         self.footer_status = ctk.CTkLabel(
-            row, text=I.t("settings_no_changes"), text_color=MUTED,
+            row, text=I.t("settings_no_changes"), text_color=SUCCESS,
             font=ctk.CTkFont(size=13), anchor="w")
-        self.footer_status.pack(side="left", padx=24)
-        ctk.CTkButton(
+        self.footer_status.pack(side="left", padx=12)
+        VisualButton(
             row, text=I.t("settings_restore_defaults"),
             width=_ui_font(13).measure(I.t("settings_restore_defaults")) + 22, font=_ui_font(13),
-            height=ACTION_HEIGHT, fg_color="transparent", hover_color=ACCENT_SOFT,
+            height=ACTION_HEIGHT, fg_color=SURFACE, hover_color=ACCENT_SOFT,
             text_color=MUTED, border_width=1, border_color=LINE,
             command=self.restore_defaults).pack(side="left", padx=4)
-        ctk.CTkButton(
+        VisualButton(
             row, text=I.t("settings_reset_all"),
             width=_ui_font(13).measure(I.t("settings_reset_all")) + 22, font=_ui_font(13),
-            height=ACTION_HEIGHT, fg_color="transparent", hover_color=DANGER_SOFT,
+            height=ACTION_HEIGHT, fg_color=SURFACE, hover_color=DANGER_SOFT,
             text_color=DANGER, border_width=1, border_color=LINE,
             command=self.reset_all_settings).pack(side="left", padx=4)
-        ctk.CTkButton(
-            row, text=I.t("settings_save_changes"), width=150, height=ACTION_HEIGHT,
+        VisualButton(
+            row, text=I.t("settings_save_changes"),
+            width=_ui_font(13).measure(I.t("settings_save_changes")) + 22,
+            font=_ui_font(13), height=ACTION_HEIGHT,
             fg_color=GOOD, hover_color=GOOD_HOVER, command=self.save).pack(
-                side="right", padx=(6, 24))
+                side="right", padx=(6, 12))
 
     def _new_page(self, key, title, subtitle):
         page = GlassFrame(
-            self.content_host, fg_color=CARD, corner_radius=10)
+            self.content_host, glass_surface="sheet", fg_color=SURFACE, corner_radius=10)
         page.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
         page.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             page, text=title, text_color=TEXT, anchor="w",
             font=ctk.CTkFont(size=24, weight="bold")).grid(
-                row=0, column=0, sticky="ew", padx=20, pady=(4, 6))
+                row=0, column=0, sticky="ew", padx=14, pady=(8, 12))
         self._pages[key] = page
         return page
 
@@ -7539,7 +7801,7 @@ class SettingsWindow(ctk.CTkToplevel):
         card = GlassFrame(
             parent, fg_color=CARD, corner_radius=10, border_width=0,
             border_color=LINE)
-        card.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, CARD_GAP))
+        card.grid(row=row, column=0, sticky="ew", padx=10, pady=(0, 8))
         card.grid_columnconfigure(0, weight=1)
         if title:
             ctk.CTkLabel(
@@ -7554,7 +7816,7 @@ class SettingsWindow(ctk.CTkToplevel):
             parent, text=label, text_color=MUTED, anchor="w",
             font=_ui_font(12)).grid(
                 row=row, column=0, sticky="ew", padx=14, pady=(5, 3))
-        entry = ctk.CTkEntry(
+        entry = VisualEntry(
             parent, textvariable=variable, height=36, corner_radius=8,
             border_color=LINE, show=show,
             font=ctk.CTkFont(size=13))
@@ -7583,7 +7845,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(card, text=I.t("settings_app_version"), text_color=MUTED,
                      anchor="w", font=ctk.CTkFont(size=14, weight="bold")).grid(
                          row=1, column=1, sticky="ew", padx=(8, 20), pady=(6, 4))
-        ctk.CTkOptionMenu(
+        VisualOptionMenu(
             card, values=["English", "العربية"], variable=self.language_var,
             height=44, corner_radius=9, fg_color=ACCENT_SOFT,
             button_color=PRIMARY, button_hover_color=ACCENT_HOVER,
@@ -7595,12 +7857,26 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color=ACCENT, anchor="w", padx=14,
             font=ctk.CTkFont(size=15, weight="bold")).grid(
                 row=2, column=1, sticky="ew", padx=(8, 20), pady=(0, 20))
+        display = self._card(page, 3, I.t("settings_display_fonts"))
+        display.grid_columnconfigure((0, 1), weight=1)
+        display.winfo_children()[-1].grid_configure(columnspan=2)
+        sizes = [str(size) for size in range(10, 57, 2)]
+        for column, (label, variable, values) in enumerate((
+                (I.t("settings_dropdown_font"), self.dropdown_font_var, [I.t("settings_font_default")] + sizes),
+                (I.t("settings_patient_font"), self.patient_font_var, sizes))):
+            ctk.CTkLabel(display, text=label, text_color=MUTED, anchor="w", font=_ui_font(12)).grid(
+                row=1, column=column, sticky="ew", padx=14, pady=(2, 4))
+            VisualOptionMenu(display, variable=variable, values=values, height=FIELD_HEIGHT,
+                             font=_ui_font(13), fg_color=SURFACE, text_color=TEXT,
+                             button_color=ACCENT_SOFT, button_hover_color=LINE).grid(
+                row=2, column=column, sticky="ew", padx=14, pady=(0, 10))
 
     def _build_clinic_page(self):
         page = self._new_page(
             "clinic", I.t("settings_clinic"), I.t("settings_clinic_tip"))
         card = self._card(page, 2, I.t("settings_clinic_contact"))
-        card.grid_columnconfigure((0, 1, 2), weight=1)
+        card.grid_columnconfigure((0, 1, 2), weight=1, uniform="clinic_contact_fields")
+        card.winfo_children()[-1].grid_configure(columnspan=3)
         contact_fields = (
             (self.clinic_name_var, I.t("settings_clinic_name")),
             (self.clinic_address_var, I.t("settings_clinic_address")),
@@ -7614,30 +7890,39 @@ class SettingsWindow(ctk.CTkToplevel):
                 font=ctk.CTkFont(size=12, weight="bold")).grid(
                     row=1, column=column, sticky="ew",
                     padx=(left_pad, right_pad), pady=(2, 3))
-            ctk.CTkEntry(
+            VisualEntry(
                 card, textvariable=variable, height=36, corner_radius=8,
                 border_color=LINE, font=ctk.CTkFont(size=13)).grid(
                     row=2, column=column, sticky="ew",
                     padx=(left_pad, right_pad), pady=(0, 10))
         logo_card = self._card(page, 3, I.t("settings_logo"))
-        logo_card.grid_columnconfigure(0, weight=1)
-        self.logo_entry = ctk.CTkEntry(
+        logo_card.grid_columnconfigure(0, weight=0)
+        logo_card.grid_columnconfigure(1, weight=1)
+        logo_card.winfo_children()[-1].grid_configure(columnspan=4)
+        self.logo_thumbnail = ctk.CTkLabel(
+            logo_card, text="Rx", width=54, height=46, corner_radius=8,
+            fg_color=SURFACE, text_color=ACCENT, font=_ui_font(18, "bold"))
+        self.logo_thumbnail.grid(row=1, column=0, padx=(14, 8), pady=(0, 10))
+        self.logo_entry = VisualEntry(
             logo_card, textvariable=self.logo_var, height=36, corner_radius=8,
             border_color=LINE, font=ctk.CTkFont(size=13))
-        self.logo_entry.grid(row=1, column=0, sticky="ew", padx=(14, 6), pady=(0, 10))
-        ctk.CTkButton(
+        self.logo_entry.grid(row=1, column=1, sticky="ew", padx=(0, 6), pady=(0, 10))
+        VisualButton(
             logo_card, text=I.t("settings_browse"), width=88, height=36,
-            fg_color=ACCENT_SOFT, hover_color=LINE, text_color=ACCENT,
-            command=self.choose_logo).grid(row=1, column=1, padx=(0, 6), pady=(0, 10))
-        ctk.CTkButton(
+            fg_color=SURFACE, hover_color=ACCENT_SOFT, text_color=ACCENT,
+            border_width=1, border_color=LINE,
+            command=self.choose_logo).grid(row=1, column=2, padx=(0, 6), pady=(0, 10))
+        VisualButton(
             logo_card, text=I.t("settings_remove"), width=88, height=36,
-            fg_color=CARD, hover_color=DANGER_SOFT, text_color=DANGER,
+            fg_color=SURFACE, hover_color=DANGER_SOFT, text_color=DANGER,
             border_width=1, border_color=LINE,
             command=self.remove_logo).grid(
-                row=1, column=2, padx=(0, 14), pady=(0, 10))
+                row=1, column=3, padx=(0, 14), pady=(0, 10))
         preview = self._card(page, 4, I.t("settings_header_preview"))
         self.clinic_preview_card = preview
+        preview.grid_columnconfigure(0, weight=0)
         preview.grid_columnconfigure(1, weight=1)
+        preview.winfo_children()[-1].grid_configure(columnspan=2)
         placeholder = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
         self._clinic_preview_placeholder = ctk.CTkImage(
             light_image=placeholder, dark_image=placeholder, size=(1, 1))
@@ -7664,13 +7949,13 @@ class SettingsWindow(ctk.CTkToplevel):
                 card, text=label, text_color=MUTED, anchor="w",
                 font=ctk.CTkFont(size=13, weight="bold")).grid(
                     row=1, column=column, sticky="ew", padx=20, pady=(4, 4))
-        ctk.CTkOptionMenu(
+        VisualOptionMenu(
             card, values=list(cfg.PAPER_SIZES.keys()), variable=self.paper_var,
             height=44, corner_radius=9, fg_color=ACCENT_SOFT,
             button_color=PRIMARY, button_hover_color=ACCENT_HOVER,
             text_color=TEXT_SECONDARY, font=ctk.CTkFont(size=15)).grid(
                 row=2, column=0, sticky="ew", padx=20, pady=(0, 10))
-        ctk.CTkOptionMenu(
+        VisualOptionMenu(
             card, values=[I.t("settings_same_as_interface"), "English", "العربية"],
             variable=self.document_language_var, height=44, corner_radius=9,
             fg_color=ACCENT_SOFT, button_color=PRIMARY,
@@ -7685,11 +7970,11 @@ class SettingsWindow(ctk.CTkToplevel):
                 padx=20, pady=(4, 14))
         folder = self._card(page, 3, I.t("settings_export_folder"))
         folder.grid_columnconfigure(0, weight=1)
-        ctk.CTkEntry(
+        VisualEntry(
             folder, textvariable=self.export_folder_var, height=42,
             border_color=LINE).grid(
                 row=1, column=0, sticky="ew", padx=(20, 8), pady=(0, 16))
-        ctk.CTkButton(
+        VisualButton(
             folder, text=I.t("settings_browse"), width=100, height=42,
             fg_color=ACCENT_SOFT, text_color=ACCENT,
             command=self.choose_export_folder).grid(
@@ -7706,11 +7991,11 @@ class SettingsWindow(ctk.CTkToplevel):
                 row=3, column=0, sticky="ew", padx=20, pady=(0, 12))
         actions = ctk.CTkFrame(card, fg_color="transparent")
         actions.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 20))
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("settings_open_viewer"), height=ACTION_HEIGHT,
             fg_color=ACCENT_SOFT, hover_color=LINE, text_color=ACCENT,
             command=self.open_viewer).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("settings_copy_key"), height=ACTION_HEIGHT,
             fg_color=CARD, hover_color=ACCENT_SOFT, text_color=ACCENT,
             border_width=1, border_color=LINE,
@@ -7788,7 +8073,7 @@ class SettingsWindow(ctk.CTkToplevel):
         foreground = PRIMARY if primary else CARD
         text_color = "white" if primary else DANGER if danger else ACCENT
         hover = ACCENT_HOVER if primary else DANGER_SOFT if danger else ACCENT_SOFT
-        button = ctk.CTkButton(
+        button = VisualButton(
             parent, text=text, width=max(76, len(text) * 7 + 24), height=32,
             font=ctk.CTkFont(size=11, weight="bold"),
             fg_color=foreground, hover_color=hover, text_color=text_color,
@@ -7820,12 +8105,12 @@ class SettingsWindow(ctk.CTkToplevel):
         self._set_initial_gemini_status()
         actions = ctk.CTkFrame(card, fg_color="transparent")
         actions.grid(row=6, column=0, sticky="ew", padx=14, pady=(0, 10))
-        self.gemini_test_button = ctk.CTkButton(
+        self.gemini_test_button = VisualButton(
             actions, text=I.t("gemini_test"), height=34,
             fg_color=ACCENT_SOFT, hover_color=LINE, text_color=ACCENT,
             command=self.test_gemini_connection)
         self.gemini_test_button.pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("gemini_remove_key"), height=34,
             fg_color=CARD, hover_color=DANGER_SOFT, text_color=DANGER,
             border_width=1, border_color=LINE,
@@ -7837,7 +8122,7 @@ class SettingsWindow(ctk.CTkToplevel):
             help_header, text=I.t("gemini_api_key_help"), text_color=TEXT_SECONDARY,
             anchor="w", font=ctk.CTkFont(size=13, weight="bold")).pack(
                 side="left", fill="x", expand=True)
-        ctk.CTkButton(
+        VisualButton(
             help_header, text="aistudio.google.com/app/apikey ↗", width=225,
             height=30, fg_color="transparent", text_color=ICON_BLUE,
             border_width=0, hover_color=ACCENT_SOFT,
@@ -7866,15 +8151,15 @@ class SettingsWindow(ctk.CTkToplevel):
                 row=1, column=0, sticky="ew", padx=14, pady=(3, 8))
         actions = ctk.CTkFrame(card, fg_color="transparent")
         actions.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 10))
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("settings_create_backup"), height=34,
             fg_color=PRIMARY, hover_color=ACCENT_HOVER,
             command=self.create_backup).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("settings_restore_backup"), height=34,
             fg_color=ACCENT_SOFT, hover_color=LINE, text_color=ACCENT,
             command=self.master.restore_backup).pack(side="left")
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("settings_open_backup_folder"), height=34,
             fg_color=CARD, hover_color=ACCENT_SOFT, text_color=ACCENT,
             border_width=1, border_color=LINE,
@@ -7919,14 +8204,14 @@ class SettingsWindow(ctk.CTkToplevel):
         self.recovery_items_body.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 10))
         recovery_nav = ctk.CTkFrame(card, fg_color="transparent")
         recovery_nav.grid(row=3, column=0, sticky="e", padx=10, pady=(0, 8))
-        ctk.CTkButton(recovery_nav, text=I.t("previous"), width=86, height=28,
+        VisualButton(recovery_nav, text=I.t("previous"), width=86, height=28,
                       fg_color=CARD, text_color=ACCENT, border_width=1,
                       border_color=LINE, command=lambda: self.change_recovery_page(-1)).pack(
                           side="left", padx=3)
         self.recovery_page_label = ctk.CTkLabel(
             recovery_nav, text="1 / 1", width=60, text_color=MUTED)
         self.recovery_page_label.pack(side="left", padx=3)
-        ctk.CTkButton(recovery_nav, text=I.t("next_page"), width=86, height=28,
+        VisualButton(recovery_nav, text=I.t("next_page"), width=86, height=28,
                       fg_color=CARD, text_color=ACCENT, border_width=1,
                       border_color=LINE, command=lambda: self.change_recovery_page(1)).pack(
                           side="left", padx=3)
@@ -7964,12 +8249,12 @@ class SettingsWindow(ctk.CTkToplevel):
             ctk.CTkLabel(row, text=text, text_color=TEXT_SECONDARY, anchor="w",
                          justify="left", font=ctk.CTkFont(size=11, weight="bold")).pack(
                              side="left", fill="x", expand=True, padx=10, pady=7)
-            ctk.CTkButton(
+            VisualButton(
                 row, text=I.t("restore_item"), width=82, height=30,
                 fg_color=PRIMARY, hover_color=ACCENT_HOVER,
                 command=lambda item_id=item.get("id", ""): self.restore_recovery_item(item_id)
             ).pack(side="left", padx=3)
-            ctk.CTkButton(
+            VisualButton(
                 row, text=I.t("delete_permanently"), width=108, height=30,
                 fg_color="transparent", text_color=DANGER, hover_color=DANGER_SOFT,
                 command=lambda item_id=item.get("id", ""): self.delete_recovery_item(item_id)
@@ -8075,7 +8360,7 @@ class SettingsWindow(ctk.CTkToplevel):
         dirty = self._snapshot() != self._saved_snapshot
         self.footer_status.configure(
             text=I.t("settings_unsaved") if dirty else I.t("settings_no_changes"),
-            text_color=WARNING if dirty else MUTED)
+            text_color=WARNING if dirty else SUCCESS)
 
     def cancel(self):
         if hasattr(self, "_saved_snapshot") and self._snapshot() != self._saved_snapshot:
@@ -8120,6 +8405,9 @@ class SettingsWindow(ctk.CTkToplevel):
                 cfg.config.viewer_base_url = viewer_url
                 cfg.config.paper_size = self.paper_var.get()
                 cfg.config.language = language
+                cfg.config.set_ui_font_sizes(
+                    0 if self.dropdown_font_var.get() == I.t("settings_font_default") else int(self.dropdown_font_var.get()),
+                    int(self.patient_font_var.get()))
                 cfg.config.set_gemini(gemini_key, self.gemini_enabled_var.get())
                 document_language = {
                     "English": "en", "العربية": "ar",
@@ -8149,6 +8437,8 @@ class SettingsWindow(ctk.CTkToplevel):
         if language_changed:
             I.set_lang(language)
             self.master.reload_texts()
+        if hasattr(self.master, "apply_ui_font_preferences"):
+            self.master.apply_ui_font_preferences()
         messagebox.showinfo(I.t("set_title"), I.t("settings_saved"), parent=self.master)
 
     def restore_defaults(self):
@@ -8158,6 +8448,8 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         if self._active_section == "general":
             self.language_var.set("English")
+            self.dropdown_font_var.set(I.t("settings_font_default"))
+            self.patient_font_var.set("14")
         elif self._active_section == "clinic":
             self.clinic_name_var.set("")
             self.clinic_address_var.set("")
@@ -8185,6 +8477,8 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         self.language_var.set("English")
         self.clinic_name_var.set("")
+        self.dropdown_font_var.set(I.t("settings_font_default"))
+        self.patient_font_var.set("14")
         self.clinic_address_var.set("")
         self.clinic_phone_var.set("")
         self.logo_var.set("")
@@ -8250,17 +8544,13 @@ class SettingsWindow(ctk.CTkToplevel):
     def update_clinic_preview(self):
         if not hasattr(self, "clinic_preview_text"):
             return
-        if not self.document_header_var.get():
-            self.clinic_preview_text.configure(text=I.t("settings_header_hidden"))
-            self.clinic_preview_logo.configure(
-                text="—", image=self._clinic_preview_placeholder)
-            self._clinic_preview_image = None
-            return
+        header_visible = self.document_header_var.get()
         name = self.clinic_name_var.get().strip() or I.t("settings_clinic_name")
         details = "  |  ".join(
             item for item in (self.clinic_address_var.get().strip(),
                               self.clinic_phone_var.get().strip()) if item)
-        self.clinic_preview_text.configure(text=name + ("\n" + details if details else ""))
+        self.clinic_preview_text.configure(text=(name + ("\n" + details if details else ""))
+                                           if header_visible else I.t("settings_header_hidden"))
         logo_path = self.logo_var.get().strip()
         try:
             if logo_path and Path(logo_path).is_file():
@@ -8270,13 +8560,16 @@ class SettingsWindow(ctk.CTkToplevel):
                 self._clinic_preview_image = ctk.CTkImage(
                     light_image=image, dark_image=image, size=image.size)
                 self.clinic_preview_logo.configure(
-                    text="", image=self._clinic_preview_image)
+                    text="" if header_visible else "—",
+                    image=self._clinic_preview_image if header_visible else self._clinic_preview_placeholder)
+                self.logo_thumbnail.configure(text="", image=self._clinic_preview_image)
                 return
         except Exception:
             logging.exception("Clinic logo preview could not be rendered")
         self._clinic_preview_image = None
         self.clinic_preview_logo.configure(
-            text="Rx", image=self._clinic_preview_placeholder)
+            text="Rx" if header_visible else "—", image=self._clinic_preview_placeholder)
+        self.logo_thumbnail.configure(text="Rx", image=self._clinic_preview_placeholder)
 
     def import_database(self):
         self.master.import_db(on_done=self._sync_database_status)
@@ -8500,7 +8793,7 @@ class GeminiSettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(self, text=I.t("gemini_api_key"), text_color=MUTED,
                      anchor="w").pack(fill="x", padx=18, pady=(0, 3))
         self.key_var = tk.StringVar(value=cfg.config.gemini_api_key)
-        self.key_entry = ctk.CTkEntry(
+        self.key_entry = VisualEntry(
             self, textvariable=self.key_var, show="•", height=FIELD_HEIGHT,
             corner_radius=9, border_color=LINE)
         self.key_entry.pack(fill="x", padx=18)
@@ -8514,16 +8807,16 @@ class GeminiSettingsWindow(ctk.CTkToplevel):
         self.status_label.pack(fill="x", padx=18, pady=(0, 10))
         actions = ctk.CTkFrame(self, fg_color="transparent")
         actions.pack(fill="x", padx=18, pady=(4, 0))
-        self.test_button = ctk.CTkButton(
+        self.test_button = VisualButton(
             actions, text=I.t("gemini_test"), height=ACTION_HEIGHT,
             fg_color=CARD, text_color=ACCENT, border_width=1, border_color=LINE,
             hover_color=ACCENT_SOFT, command=self.test_connection)
         self.test_button.pack(side="left", padx=(0, 6))
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("gemini_remove_key"), height=ACTION_HEIGHT,
             fg_color=DANGER_FILL, hover_color=DANGER_HOVER, command=self.remove_key).pack(
                 side="left", padx=6)
-        ctk.CTkButton(
+        VisualButton(
             actions, text=I.t("set_save"), height=ACTION_HEIGHT,
             fg_color=GOOD, hover_color=GOOD_HOVER, command=self.save).pack(side="right")
 

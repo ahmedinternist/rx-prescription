@@ -17,8 +17,9 @@ from security import DataProtectionError, protect, unprotect
 
 APP_VERSION = "4.82.0"
 RECOVERY_RETENTION_DAYS = 30
+# ISO portrait sizes in points: A5 is exactly 148 × 210 mm, A4 210 × 297 mm.
 PAPER_SIZES: Dict[str, tuple[float, float]] = {
-    "A5": (420.945, 595.276), "A4": (595.276, 841.889), "Letter": (612.0, 792.0),
+    "A5": (419.528, 595.276), "A4": (595.276, 841.889),
 }
 DEFAULT_PAPER = "A4"
 DEFAULT_VIEWER_BASE = "https://ahmedinternist.github.io/rx-viewer/"
@@ -52,6 +53,7 @@ def _default_config() -> Dict[str, Any]:
         "schema": 2,
         "paper_size": DEFAULT_PAPER,
         "language": "en",
+        "ui_fonts": {"dropdown_font_size": 0, "patient_name_font_size": 14},
         "viewer_base_url": DEFAULT_VIEWER_BASE,
         "drug_db_path": str(DEFAULT_DB_PATH),
         "clinic": {"name": "", "address": "", "phone": "", "logo_path": ""},
@@ -120,6 +122,8 @@ class Config:
         self.data.setdefault("last_backup_at", "")
         self.data.setdefault("last_backup_path", "")
         self.data.setdefault("drug_db_imported_at", "")
+        if self.data.get("paper_size") not in PAPER_SIZES:
+            self.data["paper_size"] = DEFAULT_PAPER
 
     def save(self) -> None:
         with self._save_lock:
@@ -206,13 +210,32 @@ class Config:
 
     @property
     def paper_size(self) -> str:
-        return self.data.get("paper_size", DEFAULT_PAPER)
+        value = self.data.get("paper_size", DEFAULT_PAPER)
+        return value if value in PAPER_SIZES else DEFAULT_PAPER
 
     @paper_size.setter
     def paper_size(self, value: str) -> None:
         if value not in PAPER_SIZES:
             raise ValueError(f"Unknown paper size: {value}")
         self.set("paper_size", value)
+
+    def ui_font_size(self, key: str) -> int:
+        default = 14 if key == "patient_name_font_size" else 0
+        fonts = self.data.get("ui_fonts", {})
+        try:
+            value = int(fonts.get(key, default))
+        except (TypeError, ValueError, AttributeError):
+            return default
+        if key == "dropdown_font_size" and value == 0:
+            return 0
+        return value if 10 <= value <= 56 else default
+
+    def set_ui_font_sizes(self, dropdown: int, patient: int) -> None:
+        if dropdown != 0 and not 10 <= dropdown <= 56:
+            raise ValueError("Dropdown font size must be 10–56 or Default")
+        if not 10 <= patient <= 56:
+            raise ValueError("Patient name font size must be 10–56")
+        self.set("ui_fonts", {"dropdown_font_size": dropdown, "patient_name_font_size": patient})
 
     @property
     def language(self) -> str:

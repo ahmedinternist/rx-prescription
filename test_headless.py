@@ -31,10 +31,10 @@ rx = qu.Prescription(
 url = qu.build_qr_url(rx)
 qr = qu.make_qr_image(url)
 
-# Full PDF in both languages + A4/Letter/A5
+# Full PDF in both languages + A4/A5
 for lang in ("en", "ar"):
     I.set_lang(lang)
-    for paper in ("A4", "Letter", "A5"):
+    for paper in ("A4", "A5"):
         out = os.path.join(tmp, f"full_{lang}_{paper}.pdf")
         pdfgen.generate_prescription_pdf(rx, out, paper_size=paper, qr_pil_image=qr)
         assert os.path.getsize(out) > 2000
@@ -44,7 +44,7 @@ for lang in ("en", "ar"):
     I.set_lang(lang)
     for paper in ("A4", "A5"):
         out = os.path.join(tmp, f"label_{lang}_{paper}.docx")
-        pdfgen.generate_medication_label_docx(rx, out, qr_pil_image=qr)
+        pdfgen.generate_medication_label_docx(rx, out, qr_pil_image=qr, paper_size=paper)
         assert os.path.getsize(out) > 1500
 
 # DOCX + decode round-trip

@@ -1,6 +1,6 @@
 """Render full prescription PDFs and editable Word prescription documents.
 
-The PDF supports A5, A4, and Letter paper. Word output is available with or
+The PDF and Word exports support A5 and A4 paper. Word output is available with or
 without the clinic header. All layouts support English and Arabic text via
 arabic-reshaper, python-bidi, and an available Tahoma or Arial font.
 """
@@ -13,7 +13,7 @@ from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
@@ -93,8 +93,8 @@ def _t(key, **kw):
     return ar(I.t(key, **kw))
 
 
-PAGE_MAP = {"A4": A4, "Letter": letter, "A5": (420.945, 595.276)}
-SCALE = {"A4": 1.0, "Letter": 0.94, "A5": 0.82}
+PAGE_MAP = {"A4": A4, "A5": PAPER_SIZES["A5"]}
+SCALE = {"A4": 1.0, "A5": 0.82}
 
 
 def _generate_modern_prescription_pdf(
@@ -271,8 +271,20 @@ def generate_prescription_pdf(
 # Compact medication label as an EDITABLE Word file
 # (drug + dosage/frequency/duration/notes + QR a few lines above the bottom-right)
 # ---------------------------------------------------------------------------
+def _set_word_paper_size(doc, paper_size):
+    """Do not inherit python-docx's Letter page size from its default template."""
+    from docx.shared import Pt
+    from docx.oxml.ns import qn
+    width, height = PAPER_SIZES.get(paper_size, PAPER_SIZES["A4"])
+    for section in doc.sections:
+        section.page_width = Pt(width)
+        section.page_height = Pt(height)
+        # Explicit ISO dimensions are authoritative; remove any stale paper code.
+        section._sectPr.pgSz.attrib.pop(qn("w:code"), None)
+
+
 def generate_medication_label_docx(rx: Prescription, output_path: str,
-                                   qr_pil_image=None) -> str:
+                                   qr_pil_image=None, paper_size: str = "A4") -> str:
     """Write a compact, editable Word file with the medication details + QR.
 
     The QR is placed a few lines above the bottom-right corner (not flush in the
@@ -289,6 +301,7 @@ def generate_medication_label_docx(rx: Prescription, output_path: str,
 
     doc = Document()
 
+    _set_word_paper_size(doc, paper_size)
     # narrower label-friendly margins
     for s in doc.sections:
         s.top_margin = Cm(1.2)
@@ -337,7 +350,7 @@ def generate_medication_label_docx(rx: Prescription, output_path: str,
 def generate_prescription_docx(
         rx: Prescription, output_path: str, qr_pil_image=None,
         show_header: bool = True, logo_size: str = "medium",
-        margin_mm_value: int = 16) -> str:
+        margin_mm_value: int = 16, paper_size: str = "A4") -> str:
     """Write a fully editable Word document with the same content + QR image."""
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
@@ -347,6 +360,7 @@ def generate_prescription_docx(
     muted = RGBColor(0x5b, 0x6b, 0x85)
 
     doc = Document()
+    _set_word_paper_size(doc, paper_size)
     margin_inches = max(8, min(30, int(margin_mm_value))) / 25.4
     for section in doc.sections:
         section.top_margin = Inches(margin_inches)
