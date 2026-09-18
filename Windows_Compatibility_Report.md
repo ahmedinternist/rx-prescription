@@ -35,7 +35,7 @@ Windows compatibility still requires actual machines/VMs; it is not certified.
 | Segoe UI, Tahoma, Arial availability on this host | Present |
 | Executable PE inspection | AMD64/x64, GUI subsystem |
 | Bundled native library PE inspection | All 95 DLL/PYD files parsed successfully; all AMD64/x64 |
-| Essential packaged resources | Drug seed CSV, edit icon, viewer HTML, Python 3.13 DLL and both Visual C++ runtime DLLs present |
+| Essential packaged resources (historical build) | Drug seed CSV, edit icon, Python 3.13 DLL and both Visual C++ runtime DLLs present; static viewer HTML is retired from the cloud-QR build |
 
 These UI checks instantiate the source application with hidden windows.
 They test callback/workflow behavior, not pixel-perfect visibility at every DPI,

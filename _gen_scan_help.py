@@ -1,4 +1,4 @@
-"""Generate a printable one-page 'How to scan' instruction sheet for pharmacists.
+"""DEPRECATED legacy sample QR instruction sheet generator.
 
 Embeds the sample QR (test_qr.png) and explains, in English + Arabic, how to
 open the full prescription with any phone camera + internet.

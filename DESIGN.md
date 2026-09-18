@@ -1,5 +1,15 @@
 # Glass dashboard refinement plan
 
+## Cloud QR Settings and export states — 2026-09-18
+
+Reference lock: preserve the existing compact Clinical Glass Settings cards,
+opaque white inputs, blue action text and native keyboard focus. The approved
+cloud QR plan owns content and failure choices; Refero craft-details owns visible
+submit states and disabled controls while requests run. Replace static viewer/key
+controls with the fixed endpoint, a masked API-key input and a clear upload notice.
+Use the existing busy footer for progress and a compact three-choice failure dialog.
+No new imagery, tooltips, palette or dashboard redesign is introduced.
+
 ## Uncapped top search width — 2026-09-18
 
 Reference lock: the user's annotated search screenshot requests a wider result

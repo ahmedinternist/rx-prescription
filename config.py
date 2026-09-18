@@ -55,6 +55,7 @@ def _default_config() -> Dict[str, Any]:
         "language": "en",
         "ui_fonts": {"dropdown_font_size": 0, "patient_name_font_size": 14},
         "viewer_base_url": DEFAULT_VIEWER_BASE,
+        "cloud_rx_api_key": "",
         "drug_db_path": str(DEFAULT_DB_PATH),
         "clinic": {"name": "", "address": "", "phone": "", "logo_path": ""},
         "doctor": doctor,
@@ -156,6 +157,14 @@ class Config:
     def get(self, key: str, default=None):
         return self.data.get(key, default)
 
+    @property
+    def cloud_rx_api_key(self) -> str:
+        return str(self.data.get("cloud_rx_api_key", ""))
+
+    @cloud_rx_api_key.setter
+    def cloud_rx_api_key(self, value: str) -> None:
+        self.set("cloud_rx_api_key", str(value or "").strip())
+
     def set(self, key: str, value: Any) -> None:
         self.data[key] = value
         self.save()
@@ -247,6 +256,7 @@ class Config:
 
     @property
     def viewer_base_url(self) -> str:
+        """Deprecated legacy viewer setting; retained for old backups only."""
         return self.data.get("viewer_base_url", DEFAULT_VIEWER_BASE)
 
     @viewer_base_url.setter

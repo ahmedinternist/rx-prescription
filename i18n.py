@@ -5,6 +5,8 @@ set_lang(code) to switch. Strings cover both the desktop GUI labels and the
 PDF/Word document text.
 """
 from __future__ import annotations
+import threading
+from contextlib import contextmanager
 
 LANG = "en"
 
@@ -1147,6 +1149,69 @@ STRINGS = {
 }
 
 
+STRINGS["en"].update({
+    "cloud_settings_title": "Cloud prescription QR",
+    "cloud_api_key": "Cloud API key",
+    "cloud_remove_key": "Remove API key",
+    "cloud_privacy": "Stored in Windows-encrypted Settings. QR exports upload prescriber name/specialty and license, clinic phone, patient name and age when entered, date and medication details to rx-v2.vercel.app. Anyone with the link can view them. Internet is required for creating and opening cloud links.",
+    "cloud_creating": "Creating prescription link…",
+    "cloud_failed": "Could not create prescription link",
+    "cloud_retry": "Retry", "cloud_without_qr": "Export without QR", "cloud_cancel": "Cancel",
+    "cloud_failure_choices": "Retry, export this captured prescription without a QR, or cancel. No inline-data QR will be generated.",
+    "cloud_error_missing_key": "Enter your cloud API key in Settings → QR verification, then retry the export.",
+    "cloud_error_auth": "The cloud API key was rejected. Check your key in Settings.",
+    "cloud_error_quota": "The cloud service request limit was reached. Try again later.",
+    "cloud_error_server": "The cloud service is unavailable. Try again later.",
+    "cloud_error_http": "The cloud service rejected the request. Check the service configuration.",
+    "cloud_error_redirect": "The cloud endpoint returned a redirect. Credentials were not forwarded.",
+    "cloud_error_timeout": "The cloud request timed out. Check your connection. A link may already have been created; retrying may create another.",
+    "cloud_error_offline": "Could not connect to the cloud service. Check your internet connection.",
+    "cloud_error_response": "The cloud service returned an invalid prescription link or response.",
+    "cloud_error_unexpected": "Could not complete the cloud request. Try again later.",
+    "cloud_document_failed": "The document could not be created. Check the destination folder and close any open copy, then try again.",
+    "settings_qr_tip": "Cloud prescription links",
+    "settings_open_viewer": "Open cloud viewer",
+    "settings_privacy_summary": "Local records and API keys are Windows-encrypted. Cloud QR exports upload minimal prescription data; anyone with the link can view it.",
+})
+STRINGS["ar"].update({
+    "cloud_settings_title": "رمز QR للوصفة السحابية", "cloud_api_key": "مفتاح API السحابي",
+    "cloud_remove_key": "إزالة مفتاح API",
+    "cloud_privacy": "يُحفظ في إعدادات Windows المشفرة. يُرفع اسم الطبيب وتخصصه ورقم ترخيصه وهاتف العيادة واسم المريض وعمره عند إدخاله والتاريخ وتفاصيل الأدوية إلى rx-v2.vercel.app عند تصدير QR. يمكن لأي شخص يحمل الرابط عرضها. يتطلب إنشاء الروابط وفتحها اتصالاً بالإنترنت.",
+    "cloud_creating": "يجري إنشاء رابط الوصفة…", "cloud_failed": "تعذر إنشاء رابط الوصفة",
+    "cloud_retry": "إعادة المحاولة", "cloud_without_qr": "تصدير بدون QR", "cloud_cancel": "إلغاء",
+    "cloud_failure_choices": "أعد المحاولة أو صدّر الوصفة المحفوظة لهذه العملية بدون QR أو ألغِ العملية. لن يُنشأ رمز يحمل البيانات مباشرة.",
+    "cloud_error_missing_key": "أدخل مفتاح API السحابي في الإعدادات ← التحقق عبر QR ثم أعد التصدير.",
+    "cloud_error_auth": "رُفض مفتاح API السحابي. تحقق منه في الإعدادات.",
+    "cloud_error_quota": "تم تجاوز حد طلبات الخدمة. حاول لاحقاً.",
+    "cloud_error_server": "الخدمة السحابية غير متاحة. حاول لاحقاً.",
+    "cloud_error_http": "رفضت الخدمة الطلب. تحقق من إعدادات الخدمة.",
+    "cloud_error_redirect": "أعادت الخدمة توجيه الطلب. لم يُرسل المفتاح إلى وجهة أخرى.",
+    "cloud_error_timeout": "انتهت مهلة الطلب. تحقق من الاتصال. قد يكون الرابط أُنشئ بالفعل؛ إعادة المحاولة قد تنشئ رابطاً آخر.",
+    "cloud_error_offline": "تعذر الاتصال بالخدمة السحابية. تحقق من الإنترنت.",
+    "cloud_error_response": "أعادت الخدمة رابطاً أو استجابة غير صالحة.",
+    "cloud_error_unexpected": "تعذر إكمال الطلب السحابي. حاول لاحقاً.",
+    "cloud_document_failed": "تعذر إنشاء المستند. تحقق من مجلد الحفظ وأغلق أي نسخة مفتوحة ثم حاول مجدداً.",
+    "settings_qr_tip": "روابط الوصفات السحابية", "settings_open_viewer": "فتح العارض السحابي",
+    "settings_privacy_summary": "السجلات المحلية ومفاتيح API مشفرة في Windows. يُرفع الحد الأدنى من بيانات الوصفة عند تصدير QR ويمكن لحامل الرابط عرضها.",
+})
+
+_document_context = threading.local()
+
+
+@contextmanager
+def document_language(code: str):
+    """Document workers must not change the interface's global language."""
+    previous = getattr(_document_context, "language", None)
+    _document_context.language = code if code in STRINGS else LANG
+    try:
+        yield
+    finally:
+        if previous is None:
+            del _document_context.language
+        else:
+            _document_context.language = previous
+
+
 def set_lang(code: str) -> None:
     global LANG
     if code in STRINGS:
@@ -1154,11 +1219,11 @@ def set_lang(code: str) -> None:
 
 
 def get_lang() -> str:
-    return LANG
+    return getattr(_document_context, "language", LANG)
 
 
 def t(key: str, **kw) -> str:
-    s = STRINGS.get(LANG, STRINGS["en"]).get(key, key)
+    s = STRINGS.get(get_lang(), STRINGS["en"]).get(key, key)
     if kw:
         try:
             s = s.format(**kw)

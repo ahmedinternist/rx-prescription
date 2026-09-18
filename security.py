@@ -1,8 +1,8 @@
 """Windows data-protection helpers used for local application secrets.
 
-The app deliberately does not retain patient records. The only persistent
-secrets are the doctor's signing key and clinic settings, which are encrypted
-with the current Windows user's DPAPI key before they are written to disk.
+Local patient records, settings and API keys are encrypted with the current
+Windows user's DPAPI key before they are written to disk. Cloud QR exports
+explicitly upload minimal prescription data to the configured cloud service.
 """
 from __future__ import annotations
 

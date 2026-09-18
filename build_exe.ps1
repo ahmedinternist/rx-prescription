@@ -28,6 +28,6 @@ Write-Host "Using $python"
 & $python -m pip install -r requirements.txt pyinstaller
 if ($LASTEXITCODE -ne 0) { throw 'Could not install the build requirements.' }
 & $python -m PyInstaller --noconfirm --clean --onefile --windowed `
-  --name RxPrescription --add-data "data;data" --add-data "viewer.html;." main.py
+  --name RxPrescription --add-data "data;data" main.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller did not complete successfully.' }
 Write-Host "Built dist\\RxPrescription.exe"

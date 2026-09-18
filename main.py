@@ -20,6 +20,8 @@ from __future__ import annotations
 import datetime
 import csv
 import concurrent.futures
+import copy
+import queue
 import functools
 import logging
 import math
@@ -43,6 +45,7 @@ import config as cfg
 import drug_db as dbmod
 import pdf_generator as pdfgen
 import qr_utils as qu
+import cloud_rx
 import i18n as I
 import openfda
 import drug_classes as classes
@@ -1601,6 +1604,9 @@ class App(ctk.CTk):
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=3, thread_name_prefix="rx-worker")
         self._background_tasks = 0
+        self._background_callbacks = queue.SimpleQueue()
+        self._closing = False
+        self._export_busy = False
         self._document_lock = threading.Lock()
         self._loaded_pages = set()
         self._classification_cache = None
@@ -1615,6 +1621,31 @@ class App(ctk.CTk):
         self._class_search_job = None
         self.word_preview_visible = False
         self._build_ui()
+
+        self.after(40, self._drain_background_callbacks)
+
+    def destroy(self):
+        self._closing = True
+        if hasattr(self, "_executor"):
+            self._executor.shutdown(wait=False, cancel_futures=True)
+        super().destroy()
+
+    def _drain_background_callbacks(self):
+        if self._closing:
+            return
+        for _ in range(64):
+            try:
+                callback = self._background_callbacks.get_nowait()
+            except queue.Empty:
+                break
+            if self._closing:
+                return
+            try:
+                callback()
+            except Exception as exc:
+                self.report_callback_exception(type(exc), exc, exc.__traceback__)
+        if not self._closing:
+            self.after(40, self._drain_background_callbacks)
 
     def _build_ui(self):
         self.paper_var = tk.StringVar(value=cfg.config.paper_size)
@@ -1932,6 +1963,8 @@ class App(ctk.CTk):
                 result, error = None, exc
 
             def deliver():
+                if self._closing:
+                    return
                 if not silent:
                     self._background_tasks = max(0, self._background_tasks - 1)
                     if hasattr(self, "busy_label") and self._background_tasks == 0:
@@ -1948,10 +1981,8 @@ class App(ctk.CTk):
                         exc_info=(type(error), error, error.__traceback__))
                     messagebox.showerror(APP_TITLE, str(error), parent=self)
 
-            try:
-                self.after(0, deliver)
-            except (tk.TclError, RuntimeError):
-                pass
+            if not self._closing:
+                self._background_callbacks.put(deliver)
 
         future.add_done_callback(completed)
         return future
@@ -7428,20 +7459,8 @@ class App(ctk.CTk):
 
     # -- output --------------------------------------------------------------
     def _qr(self, rx):
-        try:
-            url = qu.build_qr_url(rx)
-            info = qu.qr_info(url)
-        except Exception as exc:
-            logging.exception("Could not create QR code")
-            messagebox.showerror(APP_TITLE, f"Could not create signed QR code:\n{exc}")
-            return None
-        if info["qr_version"] > 25:
-            answer = messagebox.askyesno(
-                APP_TITLE,
-                f"This QR is dense (version {info['qr_version']}). It may not scan reliably when printed. Continue?")
-            if not answer:
-                return None
-        return qu.make_qr_image(url)
+        """Deprecated synchronous entry point; interactive exports use workers."""
+        raise RuntimeError("Use the asynchronous cloud export workflow")
 
     def _validate(self, rx, action):
         errors, warnings = qu.validate_prescription(rx)
@@ -7454,26 +7473,14 @@ class App(ctk.CTk):
         return True
 
     def _build_full(self, path_pdf=None, path_docx=None):
-        rx = self.collect()
-        if not self._validate(rx, I.t("preview")):
-            return None
-        qr = self._qr(rx)
-        if qr is None:
-            return None
-        document = cfg.config.get("document_defaults", {}).copy()
-        # _generate_full_document applies the configured margin_mm_value.
-        document["_paper_size"] = self.paper_var.get()
-        self._generate_full_document(rx, qr, document, path_pdf, path_docx)
-        return rx
+        """Legacy callers now enter the same asynchronous cloud workflow."""
+        return self._start_cloud_export(I.t("preview"), path_pdf=path_pdf, path_docx=path_docx)
 
     def _generate_full_document(self, rx, qr, document, path_pdf=None, path_docx=None):
         """Generate a prepared document; safe to execute on a worker thread."""
         with self._document_lock:
             document_language = document.get("language", "interface")
-            previous_language = I.get_lang()
-            if document_language in ("en", "ar"):
-                I.set_lang(document_language)
-            try:
+            with I.document_language(document_language):
                 options = {
                     "show_header": bool(document.get("show_header", True)),
                     "logo_size": document.get("logo_size", "medium"),
@@ -7488,55 +7495,134 @@ class App(ctk.CTk):
                     pdfgen.generate_prescription_docx(
                         rx, path_docx, qr_pil_image=qr,
                         paper_size=document.get("_paper_size", "A4"), **options)
-            finally:
-                I.set_lang(previous_language)
 
     def _prepare_full_document(self, action):
-        rx = self.collect()
+        rx = copy.deepcopy(self.collect())
         if not self._validate(rx, action):
             return None
-        qr = self._qr(rx)
-        if qr is None:
-            return None
-        document = cfg.config.get("document_defaults", {}).copy()
+        document = copy.deepcopy(cfg.config.get("document_defaults", {}))
         document["_paper_size"] = self.paper_var.get()
-        return rx, qr, document
+        if document.get("language", "interface") == "interface":
+            document["language"] = I.get_lang()
+        return rx, document
+
+    def _set_export_busy(self, busy):
+        self._export_busy = busy
+        for widget in self.action.winfo_children():
+            if isinstance(widget, VisualButton):
+                widget.configure(state="disabled" if busy else "normal")
+
+    def _start_cloud_export(self, action, *, path_pdf=None, path_docx=None,
+                            compact=False, on_success=None):
+        if self._export_busy or self._closing:
+            return None
+        prepared = self._prepare_full_document(action)
+        if prepared is None:
+            return None
+        rx, document = prepared
+        operation = {"rx": rx, "document": document, "payload": copy.deepcopy(rx.to_cloud_payload()),
+                     "api_key": cfg.config.cloud_rx_api_key, "action": action,
+                     "path_pdf": path_pdf, "path_docx": path_docx,
+                     "compact": compact, "on_success": on_success}
+        self._set_export_busy(True)
+        self._upload_export_link(operation)
+        return operation
+
+    def _upload_export_link(self, operation):
+        def ready(link):
+            self._write_cloud_export(operation, link.url)
+
+        self.submit_background(
+            lambda: cloud_rx.upload_prescription(operation["payload"], operation["api_key"]),
+            ready, on_error=lambda error: self._cloud_export_failed(operation, error),
+            label=I.t("cloud_creating"))
+
+    def _write_cloud_export(self, operation, url):
+        def worker():
+            qr = qu.make_qr_image(url) if url is not None else None
+            if operation["compact"]:
+                # Use the same document lock/language snapshot as the headed path.
+                with self._document_lock:
+                    with I.document_language(operation["document"]["language"]):
+                        return pdfgen.generate_medication_label_docx(
+                            operation["rx"], operation["path_docx"], qr_pil_image=qr,
+                            paper_size=operation["document"]["_paper_size"])
+            return self._generate_full_document(
+                operation["rx"], qr, operation["document"],
+                operation["path_pdf"], operation["path_docx"])
+
+        def finished(result):
+            self._set_export_busy(False)
+            if operation["on_success"]:
+                operation["on_success"](result)
+
+        def failed(_error):
+            self._set_export_busy(False)
+            logging.error("Prescription document generation failed")
+            messagebox.showerror(operation["action"], I.t("cloud_document_failed"), parent=self)
+
+        self.submit_background(worker, finished, on_error=failed, label=operation["action"] + "…")
+
+    def _cloud_export_failed(self, operation, error):
+        code = error.code if isinstance(error, cloud_rx.CloudRxError) else "unexpected"
+        logging.warning("Cloud prescription upload failed (%s)", code)
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(I.t("cloud_failed"))
+        dialog.geometry("600x240")
+        dialog.transient(self)
+        ctk.CTkLabel(dialog, text=I.t("cloud_error_" + code), font=_ui_font(13),
+                     wraplength=550, justify="left").pack(fill="x", padx=20, pady=(24, 10))
+        ctk.CTkLabel(dialog, text=I.t("cloud_failure_choices"), font=_ui_font(12),
+                     wraplength=550, justify="left").pack(fill="x", padx=20, pady=(0, 16))
+        actions = ctk.CTkFrame(dialog, fg_color="transparent")
+        actions.pack(padx=12, pady=8)
+
+        def choose(choice):
+            dialog.destroy()
+            self._resolve_cloud_export_failure(operation, choice)
+
+        for label, choice in (("cloud_retry", "retry"), ("cloud_without_qr", "without"), ("cloud_cancel", "cancel")):
+            VisualButton(actions, text=I.t(label), width=_ui_font(12).measure(I.t(label)) + 22,
+                         height=32, font=_ui_font(12), fg_color=SURFACE, text_color=ACCENT,
+                         border_width=1, border_color=LINE,
+                         command=lambda value=choice: choose(value)).pack(side="left", padx=4)
+        dialog.protocol("WM_DELETE_WINDOW", lambda: choose("cancel"))
+        dialog.bind("<Escape>", lambda _event: choose("cancel"))
+        dialog.grab_set()
+
+    def _resolve_cloud_export_failure(self, operation, choice):
+        if self._closing:
+            return
+        if choice == "retry":
+            self._upload_export_link(operation)
+        elif choice == "without":
+            self._write_cloud_export(operation, None)
+        else:
+            self._set_export_busy(False)
 
     def preview(self):
         path = os.path.join(tempfile.gettempdir(), f"rx_preview_{uuid.uuid4().hex}.pdf")
-        prepared = self._prepare_full_document(I.t("preview"))
-        if not prepared:
-            return
-        rx, qr, document = prepared
-
         def finished(_result):
             try:
                 os.startfile(path)
             except Exception:
                 webbrowser.open(path)
 
-        self.submit_background(
-            lambda: self._generate_full_document(rx, qr, document, path_pdf=path),
-            finished, label=I.t("preview") + "…")
+        self._start_cloud_export(I.t("preview"), path_pdf=path, on_success=finished)
 
     def print_pdf(self):
         path = os.path.join(tempfile.gettempdir(), f"rx_print_{uuid.uuid4().hex}.pdf")
-        prepared = self._prepare_full_document(I.t("print"))
-        if not prepared:
-            return
-        rx, qr, document = prepared
-
         def finished(_result):
             try:
                 os.startfile(path, "print")
             except Exception:
                 os.startfile(path)
 
-        self.submit_background(
-            lambda: self._generate_full_document(rx, qr, document, path_pdf=path),
-            finished, label=I.t("print") + "…")
+        self._start_cloud_export(I.t("print"), path_pdf=path, on_success=finished)
 
     def export_word(self):
+        if self._export_busy:
+            return
         initial_dir = cfg.config.get("document_defaults", {}).get("export_folder", "")
         path = filedialog.asksaveasfilename(
             title=I.t("export_word"), defaultextension=".docx",
@@ -7544,11 +7630,6 @@ class App(ctk.CTk):
             filetypes=[("Word documents", "*.docx")])
         if not path:
             return
-        prepared = self._prepare_full_document(I.t("export_word"))
-        if not prepared:
-            return
-        rx, qr, document = prepared
-
         def finished(_result):
             messagebox.showinfo(I.t("export_word"), I.t("msg_exported_word", path=path))
             try:
@@ -7556,13 +7637,10 @@ class App(ctk.CTk):
             except Exception:
                 webbrowser.open(path)
 
-        self.submit_background(
-            lambda: self._generate_full_document(rx, qr, document, path_docx=path),
-            finished, label=I.t("export_word") + "…")
+        self._start_cloud_export(I.t("export_word"), path_docx=path, on_success=finished)
 
     def export_label(self):
-        rx = self.collect()
-        if not self._validate(rx, I.t("export_compact")):
+        if self._export_busy:
             return
         initial_dir = cfg.config.get("document_defaults", {}).get("export_folder", "")
         path = filedialog.asksaveasfilename(
@@ -7570,9 +7648,6 @@ class App(ctk.CTk):
             initialdir=initial_dir if Path(initial_dir).is_dir() else None,
             filetypes=[("Word documents", "*.docx")])
         if not path:
-            return
-        qr = self._qr(rx)
-        if qr is None:
             return
         def finished(_result):
             messagebox.showinfo(
@@ -7582,11 +7657,7 @@ class App(ctk.CTk):
             except Exception:
                 webbrowser.open(path)
 
-        paper_size = self.paper_var.get()
-        self.submit_background(
-            lambda: pdfgen.generate_medication_label_docx(
-                rx, path, qr_pil_image=qr, paper_size=paper_size),
-            finished, label=I.t("export_compact") + "…")
+        self._start_cloud_export(I.t("export_compact"), path_docx=path, compact=True, on_success=finished)
 
     def open_settings(self):
         SettingsWindow(self)
@@ -7644,7 +7715,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.grid_rowconfigure(0, weight=1)
 
         clinic = cfg.config.get_clinic()
-        self.viewer_var = tk.StringVar(value=cfg.config.viewer_base_url)
+        self.cloud_key_var = tk.StringVar(value=cfg.config.cloud_rx_api_key)
         self.clinic_name_var = tk.StringVar(value=clinic.get("name", ""))
         self.clinic_address_var = tk.StringVar(value=clinic.get("address", ""))
         self.clinic_phone_var = tk.StringVar(value=clinic.get("phone", ""))
@@ -7681,7 +7752,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._build_pages()
         self._show_section("general")
         self._tracked_variables = (
-            self.viewer_var, self.clinic_name_var, self.clinic_address_var,
+            self.cloud_key_var, self.clinic_name_var, self.clinic_address_var,
             self.clinic_phone_var, self.logo_var, self.paper_var,
             self.language_var, self.gemini_enabled_var, self.gemini_key_var,
             self.document_language_var, self.document_header_var,
@@ -7983,28 +8054,29 @@ class SettingsWindow(ctk.CTkToplevel):
     def _build_qr_page(self):
         page = self._new_page(
             "qr", I.t("settings_qr"), I.t("settings_qr_tip"))
-        card = self._card(page, 2, I.t("settings_verification_viewer"))
-        self._entry(card, self.viewer_var, 1, I.t("set_viewer"))
-        ctk.CTkLabel(
-            card, text=I.t("set_tip"), text_color=MUTED, justify="left",
-            anchor="w", wraplength=720, font=ctk.CTkFont(size=13)).grid(
-                row=3, column=0, sticky="ew", padx=20, pady=(0, 12))
+        card = self._card(page, 2, I.t("cloud_settings_title"))
+        ctk.CTkLabel(card, text=cloud_rx.API_URL, text_color=TEXT,
+                     font=_ui_font(12), anchor="w").grid(
+            row=1, column=0, sticky="ew", padx=20, pady=(4, 8))
+        self.cloud_key_entry = self._entry(card, self.cloud_key_var, 2, I.t("cloud_api_key"), show="•")
+        cloud_notice = ctk.CTkLabel(
+            card, text=I.t("cloud_privacy"), text_color=MUTED, justify="left",
+            anchor="w", wraplength=500, font=ctk.CTkFont(size=13))
+        cloud_notice.grid(
+                row=4, column=0, sticky="ew", padx=20, pady=(0, 12))
+        card.bind("<Configure>", lambda event: cloud_notice.configure(
+            wraplength=max(200, event.width - 40)), add="+")
         actions = ctk.CTkFrame(card, fg_color="transparent")
-        actions.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 20))
+        actions.grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 20))
         VisualButton(
             actions, text=I.t("settings_open_viewer"), height=ACTION_HEIGHT,
             fg_color=ACCENT_SOFT, hover_color=LINE, text_color=ACCENT,
-            command=self.open_viewer).pack(side="left", padx=(0, 8))
+            command=lambda: webbrowser.open(cloud_rx.VIEWER_URL)).pack(side="left", padx=(0, 8))
         VisualButton(
-            actions, text=I.t("settings_copy_key"), height=ACTION_HEIGHT,
+            actions, text=I.t("cloud_remove_key"), height=ACTION_HEIGHT,
             fg_color=CARD, hover_color=ACCENT_SOFT, text_color=ACCENT,
             border_width=1, border_color=LINE,
-            command=self.copy_verification_key).pack(side="left")
-        ctk.CTkLabel(
-            card, text=I.t("settings_viewer_configured"),
-            fg_color=ACCENT_SOFT, text_color=ACCENT, corner_radius=12,
-            height=28, font=ctk.CTkFont(size=12, weight="bold")).grid(
-                row=5, column=0, sticky="w", padx=20, pady=(0, 16))
+            command=lambda: self.cloud_key_var.set("")).pack(side="left")
 
     def _build_database_page(self):
         page = self._new_page(
@@ -8370,13 +8442,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.destroy()
 
     def save(self):
-        viewer_url = self.viewer_var.get().strip().rstrip("/")
         logo_path = self.logo_var.get().strip()
-        if not viewer_url.lower().startswith(("https://", "http://")):
-            self._show_section("qr")
-            messagebox.showerror(
-                I.t("set_title"), I.t("settings_invalid_viewer"), parent=self)
-            return
         if logo_path and not Path(logo_path).is_file():
             self._show_section("clinic")
             messagebox.showerror(
@@ -8402,7 +8468,7 @@ class SettingsWindow(ctk.CTkToplevel):
                                       address=self.clinic_address_var.get().strip(),
                                       phone=self.clinic_phone_var.get().strip(),
                                       logo_path=logo_path)
-                cfg.config.viewer_base_url = viewer_url
+                cfg.config.cloud_rx_api_key = self.cloud_key_var.get()
                 cfg.config.paper_size = self.paper_var.get()
                 cfg.config.language = language
                 cfg.config.set_ui_font_sizes(
@@ -8461,7 +8527,7 @@ class SettingsWindow(ctk.CTkToplevel):
             self.document_header_var.set(True)
             self.export_folder_var.set("")
         elif self._active_section == "qr":
-            self.viewer_var.set(cfg.DEFAULT_VIEWER_BASE)
+            self.cloud_key_var.set("")
         elif self._active_section == "gemini":
             self.gemini_enabled_var.set(False)
             self.gemini_key_var.set("")
@@ -8486,29 +8552,13 @@ class SettingsWindow(ctk.CTkToplevel):
         self.document_language_var.set(I.t("settings_same_as_interface"))
         self.document_header_var.set(True)
         self.export_folder_var.set("")
-        self.viewer_var.set(cfg.DEFAULT_VIEWER_BASE)
+        self.cloud_key_var.set("")
         self.gemini_enabled_var.set(False)
         self.gemini_key_var.set("")
         self.auto_backup_var.set(False)
 
     def open_viewer(self):
-        url = self.viewer_var.get().strip()
-        if url.lower().startswith(("http://", "https://")):
-            webbrowser.open(url)
-        else:
-            webbrowser.open(str(cfg.PROJECT_DIR / "viewer.html"))
-
-    def copy_verification_key(self):
-        import json
-        try:
-            key = json.dumps(qu.verification_key(), separators=(",", ":"))
-            self.clipboard_clear()
-            self.clipboard_append(key)
-            messagebox.showinfo(
-                APP_TITLE, I.t("settings_key_copied"), parent=self)
-        except Exception as exc:
-            logging.exception("Could not export verification key")
-            messagebox.showerror(APP_TITLE, str(exc), parent=self)
+        webbrowser.open(cloud_rx.VIEWER_URL)
 
     def choose_logo(self):
         path = filedialog.askopenfilename(

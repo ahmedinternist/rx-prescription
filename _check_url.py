@@ -1,3 +1,4 @@
+"""DEPRECATED historical inline-QR diagnostic; not used by cloud exports."""
 import qr_utils as qu
 import json
 

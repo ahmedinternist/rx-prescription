@@ -1,0 +1,18 @@
+--- a/app/p/[id]/page.tsx
++++ b/app/p/[id]/page.tsx
+@@ -1,1 +1,2 @@
+ import { notFound } from 'next/navigation';
++import { normalizePrescription } from '../../lib/rx-normalizer';
+@@ -38,1 +39,3 @@
+-  const rx: PrescriptionData = typeof result === 'string' ? JSON.parse(result) : result;
++  const stored: unknown = typeof result === 'string' ? JSON.parse(result) : result;
++  const rx = normalizePrescription(stored);
++  if (!rx) notFound();
+@@ -49,2 +52,2 @@
+-          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Verified Digital Prescription</h1>
+-          <p style={{ margin: '2px 0 0', fontSize: '13px', opacity: 0.9 }}>Dispensing Verification Record</p>
++          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Digital Prescription</h1>
++          <p style={{ margin: '2px 0 0', fontSize: '13px', opacity: 0.9 }}>Shared Prescription Record</p>
+@@ -91,1 +94,1 @@
+-            <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block', marginTop: '4px' }}>Scan to Verify</span>
++            <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block', marginTop: '4px' }}>Scan to View</span>

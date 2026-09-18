@@ -1,6 +1,11 @@
-"""QR-code payload encoding for prescriptions.
+"""Prescription models and QR image generation.
 
-Design (hybrid, privacy-friendly):
+LEGACY ONLY: the encoding/decoding/signing helpers below are deprecated.
+They are retained for historical compatibility tests, not used by application
+exports and never used as a cloud failure fallback. New QR content is the URL
+returned by cloud_rx.upload_prescription. The following describes OLD QR codes:
+
+Legacy design:
   * The FULL prescription (doctor + patient + drugs) is encoded directly into
     the QR code, so it works offline with any free QR scanner.
   * The payload is shaped as a URL:  <viewer_base>#<encoded-data>
@@ -94,11 +99,10 @@ class Prescription:
         }
 
     def to_qr_payload(self) -> Dict[str, Any]:
-        """Minimal signed data for phone verification and reliable QR scanning.
+        """Historical version-4 schema, retained for previously issued QR codes.
 
-        Optional values are omitted instead of encoded as empty strings.  This
-        lets the web viewer hide unused medication columns and keeps the QR as
-        small as practical.
+        Optional values are omitted instead of encoded as empty strings, letting
+        the cloud viewer hide unused medication columns.
         """
         doctor: Dict[str, str] = {"name": self.doctor.name}
         if self.doctor.specialty:
@@ -124,6 +128,40 @@ class Prescription:
             "patient": {"name": self.patient.name},
             "drugs": drugs,
         }
+
+    def to_cloud_payload(self) -> Dict[str, Any]:
+        """Explicit mobile-viewer contract; never serialize the full local record.
+
+        The application calls the scientific/molecule field ``generic_name``
+        internally, and the commercial/trade field ``brand_name``. Instructions
+        combine frequency and notes because the viewer has a single Sig field.
+        Missing clinical values are not inferred or replaced with defaults.
+        """
+        payload: Dict[str, Any] = {
+            "doctor": " · ".join(value.strip() for value in
+                                 (self.doctor.name, self.doctor.specialty) if value.strip()),
+            "patient": self.patient.name.strip(),
+            "date": self.date.strip(),
+            "medications": [],
+        }
+        for key, value in (("registrationId", self.doctor.license_no),
+                           ("phone", self.clinic.phone), ("age", self.patient.age)):
+            if value.strip():
+                payload[key] = value.strip()
+        for drug in self.drugs:
+            item = {}
+            for key, value in (("tradeName", drug.brand_name),
+                               ("genericName", drug.generic_name),
+                               ("dosage", drug.dosage), ("duration", drug.duration),
+                               ("quantity", drug.quantity)):
+                if value.strip():
+                    item[key] = value.strip()
+            instructions = " · ".join(value.strip() for value in
+                                        (drug.frequency, drug.notes) if value.strip())
+            if instructions:
+                item["instructions"] = instructions
+            payload["medications"].append(item)
+        return payload
 
 
 def canonical_payload(payload: Dict[str, Any]) -> bytes:
@@ -200,7 +238,7 @@ def verification_key() -> Dict[str, str]:
 # Encode / decode
 # ---------------------------------------------------------------------------
 def encode_payload(prescription: Prescription, compress: bool = True) -> str:
-    """Return the encoded (base64url) string WITHOUT the viewer base URL."""
+    """DEPRECATED legacy base64url encoding; not used by cloud exports."""
     raw = canonical_payload(_sign(prescription.to_qr_payload()))
     if compress:
         raw = zlib.compress(raw, level=9)
@@ -210,7 +248,7 @@ def encode_payload(prescription: Prescription, compress: bool = True) -> str:
 
 def build_qr_url(prescription: Prescription, viewer_base: Optional[str] = None,
                  compress: bool = True) -> str:
-    """Return the full QR content: viewer_base + '#' + encoded payload.
+    """DEPRECATED: legacy QR content, never call from the cloud export workflow.
 
     If the base URL already ends with '#', we don't double it.
     """
@@ -220,7 +258,7 @@ def build_qr_url(prescription: Prescription, viewer_base: Optional[str] = None,
 
 
 def decode_payload(encoded: str, compressed: Optional[bool] = None) -> Dict[str, Any]:
-    """Decode a base64url payload back to a dict.
+    """DEPRECATED legacy decoder, retained only for historical QR compatibility.
 
     If `compressed` is None we auto-detect: try plain JSON first, then zlib.
     """
@@ -239,7 +277,7 @@ def decode_payload(encoded: str, compressed: Optional[bool] = None) -> Dict[str,
 
 
 def decode_from_url(url: str) -> Dict[str, Any]:
-    """Decode from a full URL (takes the part after the last '#')."""
+    """DEPRECATED legacy fragment decoder; cloud links require no client decoding."""
     if "#" in url:
         frag = url.rsplit("#", 1)[1]
     else:

@@ -1,3 +1,4 @@
+"""DEPRECATED historical static-viewer sample generator; not a cloud export."""
 import qr_utils as qu
 import pdf_generator as pdfgen  # ensures qrcode import available
 from pathlib import Path

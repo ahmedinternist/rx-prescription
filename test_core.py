@@ -17,7 +17,7 @@ def run_isolated(tmp_path: Path, code: str) -> subprocess.CompletedProcess[str]:
         raise AssertionError(exc.stderr or exc.stdout) from exc
 
 
-def test_signed_qr_round_trip_and_validation(tmp_path):
+def test_legacy_signed_qr_round_trip_and_validation(tmp_path):
     code = '''
 import qr_utils as q
 from config import CONFIG_PATH, Config, config
@@ -1281,7 +1281,7 @@ def test_settings_workspace_has_search_output_defaults_diagnostics_and_safety():
     about_source = inspect.getsource(SettingsWindow._build_about_page)
     save_source = inspect.getsource(SettingsWindow.save)
     remove_key_source = inspect.getsource(SettingsWindow.remove_gemini_key)
-    build_source = inspect.getsource(App._build_full)
+    build_source = inspect.getsource(App._generate_full_document)
     backup_source = inspect.getsource(Config.maybe_create_automatic_backup)
     assert "settings_search_var" in init_source
     assert "_build_header" not in init_source

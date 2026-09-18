@@ -167,8 +167,8 @@ def _generate_modern_prescription_pdf(
         row = Table([[pill, body]], colWidths=[12*mm*scale, doc.width-12*mm*scale])
         row.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,0), (0,0), colors.HexColor("#c9f8f1")), ("TOPPADDING", (0,0), (-1,-1), 5*scale), ("BOTTOMPADDING", (0,0), (-1,-1), 8*scale)]))
         story.append(row)
-    story += [Spacer(1, 10*mm*scale), Table([[""]], colWidths=[doc.width], style=TableStyle([("LINEABOVE", (0,0), (-1,-1), 1.1, line)])), Spacer(1, 6*mm*scale)]
     if qr_pil_image:
+        story += [Spacer(1, 10*mm*scale), Table([[""]], colWidths=[doc.width], style=TableStyle([("LINEABOVE", (0,0), (-1,-1), 1.1, line)])), Spacer(1, 6*mm*scale)]
         from reportlab.platypus import Image as RLImage
         qr = RLImage(_qr_path(qr_pil_image), width=42*mm*scale, height=42*mm*scale)
         caption = Paragraph("Scan", base)
@@ -320,11 +320,10 @@ def generate_medication_label_docx(rx: Prescription, output_path: str,
 
     _append_word_medication_lines(doc, rx.drugs)
 
-    # a few blank lines, then the QR a few lines above the bottom-right corner
-    for _ in range(3):
-        doc.add_paragraph()
-
+    # Reserve QR-only spacing only when a QR was successfully created.
     if qr_pil_image is not None:
+        for _ in range(3):
+            doc.add_paragraph()
         import tempfile as _tf
         _tmp = _tf.NamedTemporaryFile(suffix=".png", delete=False)
         _tmp.close()

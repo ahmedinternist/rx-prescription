@@ -1,10 +1,9 @@
 # Prescription Printer with QR Code
 
 A bilingual (English / Arabic) desktop app for doctors to print prescriptions
-(PDF or editable Word) that include a **QR code** carrying the full
-prescription. When a pharmacist (or anyone) scans it with a phone camera +
-internet, they land on a free static page that shows the prescription — no
-server, no backend; the data stays inside the QR code itself.
+(PDF or editable Word) with a **QR code containing a short cloud link**.
+Minimal prescription JSON is stored by the deployed Next.js/Redis service at
+https://rx-v2.vercel.app; scanning opens its `/p/[id]` viewer. Internet is required.
 
 ## Run
 ```
@@ -41,17 +40,16 @@ The output is `dist/RxPrescription.exe`. Building requires a full Windows
 Python installation with Tcl/Tk; the script stops early if Tk cannot open.
 
 ## Safety, privacy, and QR verification
-- Patient records and explicitly saved prescription snapshots remain local and
-  are protected with Windows DPAPI for the current Windows account. They are
-  never uploaded by the app.
-- Prescription fields are validated before export. Duplicate medicines and
-  overly dense QR codes require an explicit confirmation.
-- New QR payloads are signed with an ES256 clinic-local key. To display
-  **Verified** in the static viewer, copy the public key from Settings and add
-  it to `TRUSTED_SIGNERS` in the deployed `viewer.html`. Until that step, a
-  signature is correctly shown as unregistered rather than verified.
-- A QR embeds the prescription data. Anyone who obtains the printed QR can
-  decode it; it is not suitable for confidential record storage or revocation.
+- Saved patient records and history remain local and Windows-DPAPI protected.
+  QR exports upload prescriber name/specialty and license, clinic phone, patient
+  name and age when entered, date and medication details—not patient sex, IDs,
+  allergies, clinic logo paths or signing keys. Anyone holding the link can view
+  these fields. No clinic coordinates are currently collected or uploaded.
+- Prescription fields are validated before export. Duplicate-medication warnings
+  require an explicit confirmation.
+- Cloud links are not locally ES256-signed or claimed as signature-verified.
+  Anyone holding a printed QR/short link may view the uploaded prescription.
+  Retention and link expiry are controlled by the deployed backend.
 - This project is a document-generation tool, not clinical decision support.
   Drug interactions, contraindications, and local prescribing rules must be
   supplied by an approved clinical data source and governance process.
@@ -234,19 +232,38 @@ No tooltips, clinical record changes or document-format changes are introduced.
   as CSV, XLSX, or legacy XLS.
 
 ## QR payload & viewer
-- Format: `base64url(zlib(json))` shaped as `<viewer_base_url>#<payload>`.
-  High error-correction (H). The compact label's QR is identical to the full
-  prescription's QR — it just looks different on paper.
-- `viewer.html` is the static page a pharmacist opens. Host it free on GitHub
-  Pages / Netlify and set its URL in **Settings**. The page never sends data to
-  a server — it decodes the fragment after `#` in the browser.
+- Open **Settings → QR verification**, enter the cloud API key and save Settings.
+  The key is masked and stored in Windows-encrypted configuration, not in the executable.
+- Export snapshots the explicit mobile-viewer JSON contract and POSTs it to
+  `/api/rx` on a worker: `doctor`, `registrationId`, `phone`, `patient`, `age`,
+  `date`, and `medications`. Each medicine uses `tradeName`, `genericName`
+  (scientific name), `dosage`, `instructions` (frequency and notes), `duration`,
+  and `quantity`. Unentered optional fields are omitted; no dosing is inferred.
+  `to_qr_payload()` retains the historical version-4 shape but is not uploaded
+  by active exports; `to_cloud_payload()` is the active contract.
+  Only the returned HTTPS `/p/[id]` URL enters the QR generator (error correction H).
+  Export buttons stay disabled while upload/document creation runs; form edits do
+  not affect the captured prescription. POSTs time out after 15 seconds and are
+  never automatically retried or redirected.
+- If upload fails, choose **Retry**, **Export without QR**, or **Cancel**.
+  Export without QR requires an explicit choice and omits QR/caption/QR-only spacing.
+  There is no inline-data fallback. A timeout may occur after storage succeeded;
+  an explicit retry can create another cloud record.
+- `viewer.html` and old encoding/signing helpers are deprecated historical assets,
+  excluded from new executable resources and unused by active exports. Old printed
+  QR codes still depend on their original hosted viewer and are not migrated.
+- The new mobile-schema fictitious upload, actual QR-image decoding and rendered
+  prescription were checked successfully. The historical v4 compatibility patch
+  in `backend-compat/` must not overwrite the current mobile layout. See
+  `Cloud_QR_Verification.md` for the latest viewer deployment status and QA limits.
 
 ## Files
-- `config.py`         – settings/persistence (paper, language, viewer URL, DB path, profile)
+- `config.py`         – encrypted settings/persistence, including cloud API key
 - `i18n.py`           – English / Arabic strings
 - `drug_db.py`        – CSV drug database: load / import(replace|merge) / export / search
-- `qr_utils.py`       – prescription model + QR encode/decode
+- `qr_utils.py`       – prescription models + QR image generator; deprecated legacy helpers
+- `cloud_rx.py`       – authenticated cloud link client with safe errors and URL validation
 - `pdf_generator.py`  – A5/A4 full PDF + compact label PDF + Word export (Arabic-aware)
 - `main.py`           – CustomTkinter desktop GUI
-- `viewer.html`       – static decoder page for pharmacists
+- `viewer.html`       – deprecated historical decoder, not bundled
 - `data/drugs.csv`    – seed drug database
