@@ -53,11 +53,12 @@ def _default_config() -> Dict[str, Any]:
         "schema": 2,
         "paper_size": DEFAULT_PAPER,
         "language": "en",
-        "ui_fonts": {"dropdown_font_size": 0, "patient_name_font_size": 14},
+        "ui_fonts": {"medication_font_size": 20, "instruction_font_size": 18, "name_font_size": 18},
         "viewer_base_url": DEFAULT_VIEWER_BASE,
         "cloud_rx_api_key": "",
         "drug_db_path": str(DEFAULT_DB_PATH),
-        "clinic": {"name": "", "address": "", "phone": "", "logo_path": ""},
+        "clinic": {"name": "", "address": "", "phone": "", "logo_path": "",
+                   "latitude": "", "longitude": "", "include_location": False},
         "doctor": doctor,
         "profiles": {"Default": doctor.copy()},
         "active_profile": "Default",
@@ -229,22 +230,26 @@ class Config:
         self.set("paper_size", value)
 
     def ui_font_size(self, key: str) -> int:
-        default = 14 if key == "patient_name_font_size" else 0
+        aliases = {"dropdown_font_size": "medication_font_size", "patient_name_font_size": "name_font_size"}
+        key = aliases.get(key, key)
+        defaults = {"medication_font_size": 20, "instruction_font_size": 18, "name_font_size": 18}
+        default = defaults.get(key, 0)
         fonts = self.data.get("ui_fonts", {})
         try:
-            value = int(fonts.get(key, default))
+            legacy = {"medication_font_size": "dropdown_font_size", "name_font_size": "patient_name_font_size"}
+            value = int(fonts.get(key, fonts.get(legacy.get(key), default)))
         except (TypeError, ValueError, AttributeError):
             return default
-        if key == "dropdown_font_size" and value == 0:
-            return 0
-        return value if 10 <= value <= 56 else default
+        if 10 <= value < 18:
+            return 18  # Preserve older preferences within the new supported range.
+        return value if 18 <= value <= 56 else default
 
-    def set_ui_font_sizes(self, dropdown: int, patient: int) -> None:
-        if dropdown != 0 and not 10 <= dropdown <= 56:
-            raise ValueError("Dropdown font size must be 10–56 or Default")
-        if not 10 <= patient <= 56:
-            raise ValueError("Patient name font size must be 10–56")
-        self.set("ui_fonts", {"dropdown_font_size": dropdown, "patient_name_font_size": patient})
+    def set_ui_font_sizes(self, dropdown: int, patient: int, instructions: int = 18) -> None:
+        if any(isinstance(size, bool) or not isinstance(size, int) or not 18 <= size <= 56
+               for size in (dropdown, patient, instructions)):
+            raise ValueError("Display font sizes must be 18–56")
+        self.set("ui_fonts", {"medication_font_size": dropdown, "name_font_size": patient,
+                              "instruction_font_size": instructions})
 
     @property
     def language(self) -> str:

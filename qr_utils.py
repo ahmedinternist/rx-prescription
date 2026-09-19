@@ -51,6 +51,9 @@ class Clinic:
     address: str = ""
     phone: str = ""
     logo_path: str = ""
+    latitude: str = ""
+    longitude: str = ""
+    include_location: bool = False
 
 
 @dataclass
@@ -148,6 +151,10 @@ class Prescription:
                            ("phone", self.clinic.phone), ("age", self.patient.age)):
             if value.strip():
                 payload[key] = value.strip()
+        if self.clinic.include_location is True:
+            from clinic_location import validate_coordinates
+            pin = validate_coordinates(self.clinic.latitude, self.clinic.longitude)
+            payload.update(latitude=pin.latitude, longitude=pin.longitude)
         for drug in self.drugs:
             item = {}
             for key, value in (("tradeName", drug.brand_name),

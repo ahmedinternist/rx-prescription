@@ -1854,7 +1854,10 @@ def test_settings_window_has_sidebar_pages_and_one_save_flow():
     source = inspect.getsource(SettingsWindow)
     for section in ("general", "clinic", "documents", "qr", "database", "gemini", "security"):
         assert f'("{section}"' in source
-    assert "CTkScrollableFrame" not in source
+    # The optional clinic-location card needs a scrollable clinic body on small
+    # screens; other Settings pages keep their compact, non-scrolling layout.
+    assert source.count("CTkScrollableFrame") == 1
+    assert "CTkScrollableFrame" in inspect.getsource(SettingsWindow._build_clinic_page)
     assert "_show_section" in source
     assert "_build_footer" in source
     assert "settings_unsaved" in source
@@ -2469,9 +2472,10 @@ app.patient_vars["name"].set("أحمد علي")
 app.rows[0].trade_var.set("Brand remains")
 settings = SettingsWindow(app)
 settings.withdraw()
-assert settings.dropdown_font_var.get() == I.t("settings_font_default")
+assert settings.dropdown_font_var.get() == "20"
 settings.dropdown_font_var.set("28")
 settings.patient_font_var.set("24")
+settings.instruction_font_var.set("22")
 settings.paper_var.set("A5")
 with patch("main.messagebox.showinfo"):
     settings.save()
@@ -2479,22 +2483,24 @@ assert app.paper_var.get() == "A5"
 assert cfg.Config().paper_size == "A5"
 assert cfg.Config().ui_font_size("dropdown_font_size") == 28
 assert cfg.Config().ui_font_size("patient_name_font_size") == 24
-assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 28
-assert app.favorite_sort_menu.cget("dropdown_font").cget("size") == 28
+assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 22
+assert app.rows[0].freq_entry.cget("font").cget("size") == 22
+assert app.favorite_sort_menu.cget("dropdown_font").cget("size") == 13
 assert app.patient_name_entry.cget("font").cget("size") == 24
 assert app.patient_vars["name"].get() == "أحمد علي"
 assert app.rows[0].trade_var.get() == "Brand remains"
 popup = PopupListbox(app, font=("Segoe UI", 30))
 assert popup.cget("font") == str(_ui_font(28))
 menu = VisualMenu(app, font=("Segoe UI", 44))
-assert tkfont.Font(root=app, font=menu.cget("font")).actual() == tkfont.Font(root=app, font=str(_ui_font(28))).actual()
+assert tkfont.Font(root=app, font=menu.cget("font")).actual() == tkfont.Font(root=app, font=("Segoe UI",44)).actual()
 fresh_row = app.add_row()
-assert fresh_row.notes_entry.cget("dropdown_font").cget("size") == 28
-cfg.config.set_ui_font_sizes(0, 14)
+assert fresh_row.notes_entry.cget("dropdown_font").cget("size") == 22
+cfg.config.set_ui_font_sizes(20, 18, 18)
 app.apply_ui_font_preferences()
-assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 16
-assert tkfont.Font(root=app, font=popup.cget("font")).cget("size") == 30
-assert app.patient_name_entry.cget("height") == FIELD_HEIGHT
+assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 18
+assert popup.cget("font") == str(_ui_font(20))
+assert app.patient_name_entry.cget("height") == max(
+    FIELD_HEIGHT, app.patient_name_entry.cget("font").metrics("linespace") + 12)
 assert int(app.quick_prescribe_entry.pack_info()["pady"]) == round(4 * app.quick_prescribe_entry._get_widget_scaling())
 assert app.quick_prescribe_entry.master.winfo_children()[0].cget("image") is not None
 settings = SettingsWindow(app)
@@ -2503,12 +2509,13 @@ settings.dropdown_font_var.set("32")
 settings.patient_font_var.set("30")
 with patch("main.messagebox.askyesno", return_value=True):
     settings.restore_defaults()
-assert settings.dropdown_font_var.get() == I.t("settings_font_default")
-assert settings.patient_font_var.get() == "14"
+assert settings.dropdown_font_var.get() == "20"
+assert settings.patient_font_var.get() == "18"
+assert settings.instruction_font_var.get() == "18"
 settings.destroy()
 cfg.config.data["ui_fonts"] = {"dropdown_font_size": "bad", "patient_name_font_size": 100}
-assert cfg.config.ui_font_size("dropdown_font_size") == 0
-assert cfg.config.ui_font_size("patient_name_font_size") == 14
+assert cfg.config.ui_font_size("dropdown_font_size") == 20
+assert cfg.config.ui_font_size("patient_name_font_size") == 18
 app._executor.shutdown(wait=False, cancel_futures=True)
 app.destroy()
 ''')
@@ -2518,13 +2525,13 @@ def test_settings_menus_stay_fixed_with_maximum_display_fonts(tmp_path):
     run_isolated(tmp_path, '''
 import config as cfg
 import tkinter.font as tkfont
-from main import App, SettingsWindow, VisualOptionMenu, VisualComboBox, PopupListbox, VisualMenu
-cfg.config.set_ui_font_sizes(56, 56)
+from main import App, SettingsWindow, VisualOptionMenu, VisualComboBox, PopupListbox, VisualMenu, _font_field_height
+cfg.config.set_ui_font_sizes(56, 56, 56)
 assert cfg.Config().ui_font_size("dropdown_font_size") == 56
 assert cfg.Config().ui_font_size("patient_name_font_size") == 56
-for invalid in (9, 57):
+for invalid in (10, 17, 57):
     try:
-        cfg.config.set_ui_font_sizes(invalid, 14)
+        cfg.config.set_ui_font_sizes(invalid, 18)
         raise AssertionError("Out-of-range sizes must be rejected")
     except ValueError:
         pass
@@ -2532,7 +2539,8 @@ app = App()
 app.withdraw()
 assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 56
 assert app.patient_name_entry.cget("font").cget("size") == 56
-assert app.patient_name_entry.cget("height") == 68
+assert app.patient_name_entry.cget("height") == _font_field_height(app.patient_name_entry.cget("font"))
+assert app.rows[0].notes_entry.cget("height") >= app.rows[0].notes_entry.cget("font").metrics("linespace")+12
 settings = SettingsWindow(app)
 settings.withdraw()
 menus = []
@@ -2545,7 +2553,8 @@ while pending:
     pending.extend(widget.winfo_children())
 assert len(menus) >= 5
 size_menus = [widget for widget in menus if "56" in widget.cget("values")]
-assert len(size_menus) == 2
+assert len(size_menus) == 3
+assert all(widget.cget("values")==[str(size) for size in range(18,57)] for widget in size_menus)
 assert all(widget.cget("dropdown_font").cget("size") == 13 for widget in size_menus)
 app.apply_ui_font_preferences()
 assert all(widget.cget("dropdown_font") is widget._dropdown_font_baseline for widget in menus)
@@ -2558,9 +2567,58 @@ settings.destroy()
 settings = SettingsWindow(app)
 settings.withdraw()
 assert settings.dropdown_font_var.get() == "56"
-assert app.favorite_sort_menu.cget("dropdown_font").cget("size") == 56
+assert app.favorite_sort_menu.cget("dropdown_font").cget("size") == 13
 settings.destroy()
 app._executor.shutdown(wait=False, cancel_futures=True)
+app.destroy()
+''')
+
+
+def test_font_roles_migrate_independently_and_keep_names_and_dose_consistent(tmp_path):
+    run_isolated(tmp_path, '''
+from unittest.mock import patch
+import config as cfg, i18n as I
+from main import App, PopupListbox, SettingsWindow
+cfg.config.data["ui_fonts"]={"dropdown_font_size":40,"patient_name_font_size":14}
+assert cfg.config.ui_font_size("medication_font_size")==40
+assert cfg.config.ui_font_size("instruction_font_size")==18
+assert cfg.config.ui_font_size("name_font_size")==18
+cfg.config.set_ui_font_sizes(36,24,18)
+reloaded=cfg.Config()
+assert reloaded.ui_font_size("medication_font_size")==36
+assert reloaded.ui_font_size("name_font_size")==24
+assert reloaded.ui_font_size("instruction_font_size")==18
+for args in ((17,18,18),(18,57,18),(18,18,17),(True,18,18)):
+    try: cfg.config.set_ui_font_sizes(*args)
+    except ValueError: pass
+    else: raise AssertionError("all groups must validate range")
+app=App(); app.withdraw()
+app.patient_vars["name"].set("أحمد علي")
+app.doctor_vars["name"].set("د. أحمد Ali")
+for entry in (app.rows[0].dosage_entry, app.rows[0].freq_entry,app.rows[0].dur_entry,app.rows[0].notes_entry):
+    assert entry.cget("font").cget("size")==18
+assert app.patient_name_entry.cget("font").cget("size")==24
+assert app.patient_history_list._font_role=="names"
+pending=[app]; named=[]
+while pending:
+    widget=pending.pop()
+    if getattr(widget,"_font_role",None)=="names" and hasattr(widget,"apply_preferences"):
+        named.append(widget)
+    pending.extend(widget.winfo_children())
+assert len(named)>=3
+settings=SettingsWindow(app); settings.withdraw()
+settings.dropdown_font_var.set("56")
+settings.instruction_font_var.set("20")
+settings.patient_font_var.set("26")
+with patch("main.messagebox.showinfo"): settings.save()
+assert app.rows[0].notes_entry.cget("font").cget("size")==20
+assert app.rows[0].notes_entry.cget("dropdown_font").cget("size")==20
+assert app.patient_name_entry.cget("font").cget("size")==26
+assert app.patient_vars["name"].get()=="أحمد علي"
+assert app.doctor_vars["name"].get()=="د. أحمد Ali"
+popup=PopupListbox(app)
+assert popup.cget("font")==str(__import__("main")._ui_font(56))
+assert app.favorite_sort_menu.cget("dropdown_font").cget("size")==13
 app.destroy()
 ''')
 

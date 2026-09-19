@@ -46,6 +46,7 @@ import drug_db as dbmod
 import pdf_generator as pdfgen
 import qr_utils as qu
 import cloud_rx
+import clinic_location
 import i18n as I
 import openfda
 import drug_classes as classes
@@ -708,15 +709,22 @@ def _ui_font(size=12, weight="normal", family="Segoe UI"):
     return ctk.CTkFont(family=family, size=size, weight=weight)
 
 
-def dropdown_font(baseline=None, master=None):
-    """Default preserves each control's original type; an override is global."""
+def _font_field_height(font):
+    """Use actual ascent/descent so Arabic glyphs survive large display sizes."""
+    return max(FIELD_HEIGHT, font.cget("size") + 12, font.metrics("linespace") + 12)
+
+
+def dropdown_font(baseline=None, master=None, role="medications"):
+    """Role-specific display type, never applied to Settings or neutral menus."""
     baseline = baseline or _ui_font(13)
     ancestor = master
     while ancestor is not None:
         if getattr(ancestor, "_fixed_dropdown_fonts", False):
             return baseline
         ancestor = getattr(ancestor, "master", None)
-    size = cfg.config.ui_font_size("dropdown_font_size")
+    key = {"medications": "medication_font_size", "instructions": "instruction_font_size",
+           "names": "name_font_size"}.get(role)
+    size = cfg.config.ui_font_size(key) if key else 0
     if not size:
         return baseline
     if isinstance(baseline, ctk.CTkFont):
@@ -726,32 +734,34 @@ def dropdown_font(baseline=None, master=None):
 
 class PopupListbox(tk.Listbox):
     def __init__(self, master, **kwargs):
+        self._font_role = kwargs.pop("font_role", "medications")
         self._dropdown_font_baseline = kwargs.get("font", ("Segoe UI", 16))
-        kwargs["font"] = dropdown_font(self._dropdown_font_baseline, master)
+        kwargs["font"] = dropdown_font(self._dropdown_font_baseline, master, self._font_role)
         super().__init__(master, **kwargs)
 
     def apply_preferences(self):
-        self.configure(font=dropdown_font(self._dropdown_font_baseline, self.master))
+        self.configure(font=dropdown_font(self._dropdown_font_baseline, self.master, self._font_role))
 
 
 class VisualMenu(tk.Menu):
     def __init__(self, master, **kwargs):
         self._dropdown_font_baseline = kwargs.get("font", ("Segoe UI", 16))
-        kwargs["font"] = dropdown_font(self._dropdown_font_baseline, master)
+        kwargs["font"] = dropdown_font(self._dropdown_font_baseline, master, None)
         super().__init__(master, **kwargs)
 
     def apply_preferences(self):
-        self.configure(font=dropdown_font(self._dropdown_font_baseline, self.master))
+        self.configure(font=dropdown_font(self._dropdown_font_baseline, self.master, None))
 
 
 class VisualOptionMenu(ctk.CTkOptionMenu):
     def __init__(self, master, **kwargs):
+        self._font_role = kwargs.pop("font_role", None)
         self._dropdown_font_baseline = kwargs.get("dropdown_font") or _ui_font(13)
-        kwargs["dropdown_font"] = dropdown_font(self._dropdown_font_baseline, master)
+        kwargs["dropdown_font"] = dropdown_font(self._dropdown_font_baseline, master, self._font_role)
         super().__init__(master, **kwargs)
 
     def apply_preferences(self):
-        self.configure(dropdown_font=dropdown_font(self._dropdown_font_baseline, self.master))
+        self.configure(dropdown_font=dropdown_font(self._dropdown_font_baseline, self.master, self._font_role))
 
 
 def attach_search_hint(entry, variable, text):
@@ -958,21 +968,33 @@ class FieldFocus:
 
 class VisualEntry(FieldFocus, ctk.CTkEntry):
     def __init__(self, master, **kwargs):
+        self._font_role = kwargs.pop("font_role", None)
         kwargs.setdefault("border_width", 1)
         super().__init__(master, **kwargs)
         self._bind_field_focus()
+        self.apply_preferences()
+
+    def apply_preferences(self):
+        if self._font_role:
+            font = dropdown_font(self.cget("font"), self.master, self._font_role)
+            self.configure(font=font, height=_font_field_height(font))
 
 
 class VisualComboBox(FieldFocus, ctk.CTkComboBox):
     def __init__(self, master, **kwargs):
+        self._font_role = kwargs.pop("font_role", None)
         kwargs.setdefault("border_width", 1)
         self._dropdown_font_baseline = kwargs.get("dropdown_font") or _ui_font(13)
-        kwargs["dropdown_font"] = dropdown_font(self._dropdown_font_baseline, master)
+        kwargs["dropdown_font"] = dropdown_font(self._dropdown_font_baseline, master, self._font_role)
         super().__init__(master, **kwargs)
         self._bind_field_focus()
+        self.apply_preferences()
 
     def apply_preferences(self):
-        self.configure(dropdown_font=dropdown_font(self._dropdown_font_baseline, self.master))
+        font = dropdown_font(self._dropdown_font_baseline, self.master, self._font_role)
+        self.configure(dropdown_font=font)
+        if self._font_role:
+            self.configure(font=font, height=_font_field_height(font))
 
 
 def polish_toolbar(frame):
@@ -1089,7 +1111,7 @@ class DrugRow(GlassFrame):
             entry.bind("<Return>", self._ac_choose_current)
             entry.bind("<Escape>", lambda _event: self._hide_ac())
         self.trade_picker = VisualOptionMenu(
-            trade_col, values=[I.t("choose_linked_trade_name")], height=28,
+            trade_col, font_role="medications", values=[I.t("choose_linked_trade_name")], height=28,
             fg_color=ACCENT_SOFT, text_color=ACCENT, button_color=PRIMARY,
             button_hover_color=ACCENT_HOVER, command=self._choose_linked_trade)
 
@@ -1300,6 +1322,7 @@ class DrugRow(GlassFrame):
         binding = DirectionalTextBinding(self, var)
         self._bidi_bindings.append(binding)
         e = VisualEntry(col, textvariable=binding.display_var,
+                         font_role="instructions",
                          height=FIELD_HEIGHT, corner_radius=9,
                          border_color=LINE, placeholder_text=ph,
                          font=ctk.CTkFont(size=11), justify="left")
@@ -1318,7 +1341,7 @@ class DrugRow(GlassFrame):
         binding = DirectionalTextBinding(self, var)
         self._bidi_bindings.append(binding)
         picker = VisualComboBox(
-            col, values=[directional_display_text(value) for value in FREQUENCY_OPTIONS],
+            col, font_role="instructions", values=[directional_display_text(value) for value in FREQUENCY_OPTIONS],
             variable=binding.display_var, height=FIELD_HEIGHT,
             corner_radius=9, border_width=1, border_color=LINE, fg_color=SURFACE,
             button_color=ACCENT_SOFT, button_hover_color=LINE,
@@ -1341,7 +1364,7 @@ class DrugRow(GlassFrame):
         binding = DirectionalTextBinding(self, var)
         self._bidi_bindings.append(binding)
         picker = VisualComboBox(
-            col, values=[directional_display_text(value) for value in NOTE_OPTIONS],
+            col, font_role="instructions", values=[directional_display_text(value) for value in NOTE_OPTIONS],
             variable=binding.display_var, height=FIELD_HEIGHT,
             corner_radius=9, border_width=1, border_color=LINE, fg_color=SURFACE,
             button_color=ACCENT_SOFT, button_hover_color=LINE,
@@ -2132,7 +2155,10 @@ class App(ctk.CTk):
             self._bidi_bindings.append(binding)
             display_var = binding.display_var
         entry = VisualEntry(
-            row, textvariable=display_var, width=width, height=FIELD_HEIGHT,
+            row,
+            # Only the name, not licence/specialty, participates in the name group.
+            font_role="names" if var is getattr(self, "doctor_vars", {}).get("name") else None,
+            textvariable=display_var, width=width, height=FIELD_HEIGHT,
             corner_radius=9, border_color=LINE, placeholder_text=placeholder,
             justify="left")
         if binding:
@@ -2276,7 +2302,9 @@ class App(ctk.CTk):
         patient_name_binding = DirectionalTextBinding(self, self.patient_vars["name"])
         self._bidi_bindings.append(patient_name_binding)
         self.patient_name_entry = VisualEntry(
-            name_col, textvariable=patient_name_binding.display_var,
+            name_col,
+            font_role="names",
+            textvariable=patient_name_binding.display_var,
             width=PATIENT_NAME_WIDTH, height=FIELD_HEIGHT,
             corner_radius=9, border_color=LINE,
             font=_ui_font(cfg.config.ui_font_size("patient_name_font_size")), justify="left")
@@ -2366,6 +2394,7 @@ class App(ctk.CTk):
         result_shell.pack_propagate(False)
         result_shell.pack(anchor="w")
         self.patient_history_list = PopupListbox(result_shell, height=5,
+                                                  font_role="names",
                                                font=LIST_FONT, bg=SURFACE, fg=TEXT,
                                                relief="flat", borderwidth=0, highlightthickness=0,
                                                selectbackground=PRIMARY, selectforeground="white",
@@ -2637,7 +2666,9 @@ class App(ctk.CTk):
                 self.favorite_category_combo = widget
             elif values:
                 widget = VisualComboBox(
-                    self.favorite_editor, values=list(values),
+                    self.favorite_editor,
+                    font_role="instructions",
+                    values=list(values),
                     variable=self.favorite_vars[key], height=FIELD_HEIGHT,
                     border_color=LINE, fg_color=CARD,
                     button_color=PRIMARY, button_hover_color=ACCENT_HOVER,
@@ -2647,6 +2678,7 @@ class App(ctk.CTk):
             else:
                 widget = VisualEntry(
                     self.favorite_editor, textvariable=self.favorite_vars[key],
+                    font_role="instructions" if key in {"dosage", "duration"} else None,
                     height=FIELD_HEIGHT, border_color=LINE,
                     font=ctk.CTkFont(
                         size=12, weight="bold" if key == "brand_name" else "normal"))
@@ -3584,6 +3616,7 @@ class App(ctk.CTk):
                 if options:
                     widget = VisualComboBox(
                         column_frame,
+                        font_role="instructions",
                         values=[directional_display_text(value) for value in options],
                         variable=binding.display_var, height=34, corner_radius=8,
                         border_width=1, border_color=ACCENT, fg_color=CARD,
@@ -3594,6 +3627,7 @@ class App(ctk.CTk):
                 else:
                     widget = VisualEntry(
                         column_frame, textvariable=binding.display_var,
+                        font_role="instructions",
                         height=34, corner_radius=8, border_color=LINE,
                         font=ctk.CTkFont(size=12), justify="left")
                 binding.attach(widget)
@@ -6760,7 +6794,7 @@ class App(ctk.CTk):
                  if r.get_data().generic_name or r.get_data().brand_name]
         rx_id = "RX-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         clinic = qu.Clinic(**{k: v for k, v in cfg.config.get_clinic().items()
-                              if k in {"name", "address", "phone", "logo_path"}})
+                              if k in {"name", "address", "phone", "logo_path", "latitude", "longitude", "include_location"}})
         return qu.Prescription(clinic=clinic, doctor=doctor, patient=patient, drugs=drugs,
                                date=datetime.datetime.now().strftime("%Y-%m-%d"), rx_id=rx_id)
 
@@ -7520,7 +7554,12 @@ class App(ctk.CTk):
         if prepared is None:
             return None
         rx, document = prepared
-        operation = {"rx": rx, "document": document, "payload": copy.deepcopy(rx.to_cloud_payload()),
+        try:
+            payload = copy.deepcopy(rx.to_cloud_payload())
+        except clinic_location.LocationError:
+            messagebox.showerror(I.t("location_title"), I.t("location_invalid"), parent=self)
+            return None
+        operation = {"rx": rx, "document": document, "payload": payload,
                      "api_key": cfg.config.cloud_rx_api_key, "action": action,
                      "path_pdf": path_pdf, "path_docx": path_docx,
                      "compact": compact, "on_success": on_success}
@@ -7667,11 +7706,9 @@ class App(ctk.CTk):
         pending = [self]
         while pending:
             widget = pending.pop()
-            if isinstance(widget, (VisualComboBox, VisualOptionMenu, PopupListbox, VisualMenu)):
+            if isinstance(widget, (VisualEntry, VisualComboBox, VisualOptionMenu, PopupListbox, VisualMenu)):
                 widget.apply_preferences()
             pending.extend(widget.winfo_children())
-        patient_size = cfg.config.ui_font_size("patient_name_font_size")
-        self.patient_name_entry.configure(font=_ui_font(patient_size), height=max(FIELD_HEIGHT, patient_size + 12))
         self._hide_quick_results()
         self._hide_treatment_template_suggestions()
         for row in self.rows:
@@ -7720,11 +7757,20 @@ class SettingsWindow(ctk.CTkToplevel):
         self.clinic_address_var = tk.StringVar(value=clinic.get("address", ""))
         self.clinic_phone_var = tk.StringVar(value=clinic.get("phone", ""))
         self.logo_var = tk.StringVar(value=clinic.get("logo_path", ""))
+        self.location_input_var = tk.StringVar()
+        self.latitude_var = tk.StringVar(value=clinic.get("latitude", ""))
+        self.longitude_var = tk.StringVar(value=clinic.get("longitude", ""))
+        self.include_location_var = tk.BooleanVar(value=clinic.get("include_location") is True)
+        self._confirmed_location = (self.latitude_var.get(), self.longitude_var.get())
+        self._location_cancel_event = threading.Event()
+        self._location_request_token = 0
+        self._location_busy = False
         self.paper_var = tk.StringVar(value=cfg.config.paper_size)
         self.language_var = tk.StringVar(
             value="العربية" if cfg.config.language == "ar" else "English")
         dropdown_size = cfg.config.ui_font_size("dropdown_font_size")
         self.dropdown_font_var = tk.StringVar(value=str(dropdown_size) if dropdown_size else I.t("settings_font_default"))
+        self.instruction_font_var = tk.StringVar(value=str(cfg.config.ui_font_size("instruction_font_size")))
         self.patient_font_var = tk.StringVar(value=str(cfg.config.ui_font_size("patient_name_font_size")))
         self.gemini_enabled_var = tk.BooleanVar(value=cfg.config.gemini_enabled)
         self.gemini_key_var = tk.StringVar(value=cfg.config.gemini_api_key)
@@ -7758,6 +7804,9 @@ class SettingsWindow(ctk.CTkToplevel):
             self.document_language_var, self.document_header_var,
             self.export_folder_var, self.auto_backup_var,
             self.dropdown_font_var, self.patient_font_var,
+            self.instruction_font_var,
+            self.location_input_var, self.latitude_var, self.longitude_var,
+            self.include_location_var,
         )
         self._saved_snapshot = self._snapshot()
         for variable in self._tracked_variables:
@@ -7929,23 +7978,33 @@ class SettingsWindow(ctk.CTkToplevel):
             font=ctk.CTkFont(size=15, weight="bold")).grid(
                 row=2, column=1, sticky="ew", padx=(8, 20), pady=(0, 20))
         display = self._card(page, 3, I.t("settings_display_fonts"))
-        display.grid_columnconfigure((0, 1), weight=1)
-        display.winfo_children()[-1].grid_configure(columnspan=2)
-        sizes = [str(size) for size in range(10, 57, 2)]
+        display.grid_columnconfigure((0, 1, 2), weight=1, uniform="font_sections")
+        display.winfo_children()[-1].grid_configure(columnspan=3)
+        sizes = [str(size) for size in range(18, 57)]
         for column, (label, variable, values) in enumerate((
-                (I.t("settings_dropdown_font"), self.dropdown_font_var, [I.t("settings_font_default")] + sizes),
-                (I.t("settings_patient_font"), self.patient_font_var, sizes))):
+                (I.t("settings_medication_font"), self.dropdown_font_var, sizes),
+                (I.t("settings_instruction_font"), self.instruction_font_var, sizes),
+                (I.t("settings_name_font"), self.patient_font_var, sizes))):
             ctk.CTkLabel(display, text=label, text_color=MUTED, anchor="w", font=_ui_font(12)).grid(
                 row=1, column=column, sticky="ew", padx=14, pady=(2, 4))
             VisualOptionMenu(display, variable=variable, values=values, height=FIELD_HEIGHT,
                              font=_ui_font(13), fg_color=SURFACE, text_color=TEXT,
                              button_color=ACCENT_SOFT, button_hover_color=LINE).grid(
                 row=2, column=column, sticky="ew", padx=14, pady=(0, 10))
+            preview = ctk.CTkLabel(display, text=("Drug", "1×2", "أحمد Ali")[column],
+                                   text_color=TEXT, anchor="w", font=_ui_font(int(variable.get())))
+            preview.grid(row=3, column=column, sticky="ew", padx=14, pady=(0, 10))
+            variable.trace_add("write", lambda *_args, var=variable, label=preview:
+                               label.configure(font=_ui_font(int(var.get()))))
 
     def _build_clinic_page(self):
         page = self._new_page(
             "clinic", I.t("settings_clinic"), I.t("settings_clinic_tip"))
-        card = self._card(page, 2, I.t("settings_clinic_contact"))
+        page.grid_rowconfigure(1, weight=1)
+        body = ctk.CTkScrollableFrame(page, fg_color="transparent", corner_radius=0)
+        body.grid(row=1, column=0, sticky="nsew")
+        body.grid_columnconfigure(0, weight=1)
+        card = self._card(body, 0, I.t("settings_clinic_contact"))
         card.grid_columnconfigure((0, 1, 2), weight=1, uniform="clinic_contact_fields")
         card.winfo_children()[-1].grid_configure(columnspan=3)
         contact_fields = (
@@ -7966,7 +8025,8 @@ class SettingsWindow(ctk.CTkToplevel):
                 border_color=LINE, font=ctk.CTkFont(size=13)).grid(
                     row=2, column=column, sticky="ew",
                     padx=(left_pad, right_pad), pady=(0, 10))
-        logo_card = self._card(page, 3, I.t("settings_logo"))
+        self._build_location_card(body)
+        logo_card = self._card(body, 2, I.t("settings_logo"))
         logo_card.grid_columnconfigure(0, weight=0)
         logo_card.grid_columnconfigure(1, weight=1)
         logo_card.winfo_children()[-1].grid_configure(columnspan=4)
@@ -7989,7 +8049,7 @@ class SettingsWindow(ctk.CTkToplevel):
             border_width=1, border_color=LINE,
             command=self.remove_logo).grid(
                 row=1, column=3, padx=(0, 14), pady=(0, 10))
-        preview = self._card(page, 4, I.t("settings_header_preview"))
+        preview = self._card(body, 3, I.t("settings_header_preview"))
         self.clinic_preview_card = preview
         preview.grid_columnconfigure(0, weight=0)
         preview.grid_columnconfigure(1, weight=1)
@@ -8008,6 +8068,135 @@ class SettingsWindow(ctk.CTkToplevel):
             justify="left", font=ctk.CTkFont(size=12, weight="bold"))
         self.clinic_preview_text.grid(
             row=1, column=1, sticky="ew", padx=(0, 14), pady=(0, 10))
+
+    def _build_location_card(self, body):
+        card = self._card(body, 1, I.t("location_title"))
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 5))
+        row.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(row, text=I.t("location_link_hint"), font=_ui_font(11),
+                     text_color=MUTED, anchor="w").grid(row=0, column=0, columnspan=2, sticky="ew")
+        VisualEntry(row, textvariable=self.location_input_var, height=32,
+                    placeholder_text=I.t("location_link_hint"), font=_ui_font(12),
+                    border_color=LINE).grid(row=1, column=0, sticky="ew", padx=(0, 6))
+        self._location_buttons = []
+        def button(parent, key, command):
+            widget = VisualButton(parent, text=I.t(key), command=command, height=30,
+                width=_ui_font(12).measure(I.t(key)) + 18, font=_ui_font(12),
+                fg_color=SURFACE, text_color=ACCENT, hover_color=ACCENT_SOFT,
+                border_width=1, border_color=LINE)
+            self._location_buttons.append(widget)
+            return widget
+        button(row, "location_check", self.check_clinic_location).grid(row=1, column=1)
+        coords = ctk.CTkFrame(card, fg_color="transparent")
+        coords.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 5))
+        coords.grid_columnconfigure((0, 1), weight=1)
+        for col, (variable, label) in enumerate(((self.latitude_var, "location_latitude"),
+                                               (self.longitude_var, "location_longitude"))):
+            ctk.CTkLabel(coords, text=I.t(label), font=_ui_font(11), anchor="w",
+                         text_color=MUTED).grid(row=0, column=col, sticky="ew", padx=(0, 6))
+            VisualEntry(coords, textvariable=variable, height=30, font=_ui_font(12),
+                        border_color=LINE).grid(row=1, column=col, sticky="ew", padx=(0, 6))
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.grid(row=3, column=0, sticky="w", padx=14, pady=(0, 5))
+        for col, (key, command) in enumerate((("location_open", self.open_clinic_maps),
+                ("location_current", self.use_current_clinic_location),
+                ("location_remove", self.remove_clinic_location))):
+            button(actions, key, command).grid(row=0, column=col, padx=(0, 6))
+        ctk.CTkCheckBox(card, text=I.t("location_include"), variable=self.include_location_var,
+            font=_ui_font(12), checkbox_width=18, checkbox_height=18).grid(
+                row=4, column=0, sticky="w", padx=14, pady=(0, 4))
+        ctk.CTkLabel(card, text=I.t("location_privacy"), font=_ui_font(11),
+            text_color=MUTED, anchor="w", justify="left", wraplength=560).grid(
+                row=5, column=0, sticky="ew", padx=14, pady=(0, 6))
+        self.location_status = ctk.CTkLabel(card, text="", font=_ui_font(11),
+                                          anchor="w", text_color=ACCENT)
+        self.location_status.grid(row=6, column=0, sticky="ew", padx=14)
+        self.location_status.grid_remove()
+
+    def _location_staging(self):
+        return (self.location_input_var.get(), self.latitude_var.get(), self.longitude_var.get())
+
+    def _set_location_busy(self, busy):
+        self._location_busy = busy
+        for button in self._location_buttons:
+            button.configure(state="disabled" if busy else "normal")
+        if busy:
+            self.location_status.configure(text=I.t("location_waiting"), text_color=ACCENT)
+            self.location_status.grid()
+        else:
+            self.location_status.grid_remove()
+
+    def _request_location(self, worker):
+        if self._location_busy:
+            return
+        self._location_cancel_event = threading.Event()
+        self._location_request_token += 1
+        token, snapshot = self._location_request_token, self._location_staging()
+        event = self._location_cancel_event
+        self._set_location_busy(True)
+        def current():
+            return self.winfo_exists() and token == self._location_request_token
+        def success(pin):
+            if not current():
+                return
+            self._set_location_busy(False)
+            if snapshot != self._location_staging():
+                return  # Never overwrite fields edited while the request was pending.
+            accuracy = "" if pin.accuracy is None else I.t("location_accuracy", metres=round(pin.accuracy))
+            if messagebox.askyesno(I.t("location_title"), I.t("location_confirm",
+                    latitude=f"{pin.latitude:.7f}", longitude=f"{pin.longitude:.7f}",
+                    accuracy=accuracy), parent=self):
+                self.latitude_var.set(f"{pin.latitude:.7f}")
+                self.longitude_var.set(f"{pin.longitude:.7f}")
+                self._confirmed_location = (self.latitude_var.get(), self.longitude_var.get())
+                self.location_input_var.set("")
+        def failure(exc):
+            if not current():
+                return
+            self._set_location_busy(False)
+            code = exc.code if isinstance(exc, clinic_location.LocationError) else "unavailable"
+            if code != "cancelled":
+                key = "location_" + code
+                messagebox.showerror(I.t("location_title"), I.t(key), parent=self)
+        self.master.submit_background(lambda: worker(event), success, on_error=failure, silent=True)
+
+    def check_clinic_location(self):
+        value = self.location_input_var.get().strip()
+        if value:
+            self._request_location(lambda _event: clinic_location.resolve_location(value))
+            return
+        try:
+            pin = clinic_location.validate_coordinates(self.latitude_var.get(), self.longitude_var.get())
+            webbrowser.open(clinic_location.maps_link(pin))
+        except clinic_location.LocationError:
+            messagebox.showerror(I.t("location_title"), I.t("location_invalid"), parent=self)
+
+    def open_clinic_maps(self):
+        webbrowser.open("https://www.google.com/maps")
+
+    def use_current_clinic_location(self):
+        if not messagebox.askyesno(I.t("location_title"), I.t("location_detect_confirm"), parent=self):
+            return
+        labels = {key: I.t("location_browser_" + key)
+                  for key in ("title", "detail", "button", "waiting", "done", "failed")}
+        labels["language"] = I.get_lang()
+        self._request_location(lambda event: clinic_location.detect_current_location(labels, cancel_event=event))
+
+    def remove_clinic_location(self):
+        self._location_cancel_event.set()
+        self._location_request_token += 1
+        self._set_location_busy(False)
+        self.latitude_var.set("")
+        self.longitude_var.set("")
+        self.location_input_var.set("")
+        self.include_location_var.set(False)
+
+    def destroy(self):
+        if hasattr(self, "_location_cancel_event"):
+            self._location_cancel_event.set()
+            self._location_request_token += 1
+        super().destroy()
 
     def _build_documents_page(self):
         page = self._new_page(
@@ -8402,7 +8591,7 @@ class SettingsWindow(ctk.CTkToplevel):
         query = self.settings_search_var.get().casefold().strip()
         keywords = {
             "general": "language version application",
-            "clinic": "clinic identity name address phone logo header preview",
+            "clinic": "clinic identity name address phone logo header preview location maps latitude longitude",
             "documents": "document pdf word paper margin export folder header logo language",
             "qr": "qr verification viewer key link",
             "database": "drug database medicine import replace remove validate classification",
@@ -8442,6 +8631,24 @@ class SettingsWindow(ctk.CTkToplevel):
         self.destroy()
 
     def save(self):
+        if self._location_busy or self.location_input_var.get().strip():
+            self._show_section("clinic")
+            messagebox.showerror(I.t("location_title"), I.t("location_apply_first"), parent=self)
+            return
+        latitude, longitude = self.latitude_var.get().strip(), self.longitude_var.get().strip()
+        if latitude or longitude or self.include_location_var.get():
+            try:
+                pin = clinic_location.validate_coordinates(latitude, longitude)
+                latitude, longitude = f"{pin.latitude:.7f}", f"{pin.longitude:.7f}"
+                if (self.latitude_var.get(), self.longitude_var.get()) != self._confirmed_location:
+                    if not messagebox.askyesno(I.t("location_title"), I.t("location_confirm",
+                            latitude=latitude, longitude=longitude, accuracy=""), parent=self):
+                        return
+                    self._confirmed_location = (self.latitude_var.get(), self.longitude_var.get())
+            except clinic_location.LocationError:
+                self._show_section("clinic")
+                messagebox.showerror(I.t("location_title"), I.t("location_invalid"), parent=self)
+                return
         logo_path = self.logo_var.get().strip()
         if logo_path and not Path(logo_path).is_file():
             self._show_section("clinic")
@@ -8467,13 +8674,14 @@ class SettingsWindow(ctk.CTkToplevel):
                 cfg.config.set_clinic(name=self.clinic_name_var.get().strip(),
                                       address=self.clinic_address_var.get().strip(),
                                       phone=self.clinic_phone_var.get().strip(),
-                                      logo_path=logo_path)
+                                      logo_path=logo_path, latitude=latitude, longitude=longitude,
+                                      include_location=bool(self.include_location_var.get()))
                 cfg.config.cloud_rx_api_key = self.cloud_key_var.get()
                 cfg.config.paper_size = self.paper_var.get()
                 cfg.config.language = language
                 cfg.config.set_ui_font_sizes(
-                    0 if self.dropdown_font_var.get() == I.t("settings_font_default") else int(self.dropdown_font_var.get()),
-                    int(self.patient_font_var.get()))
+                    int(self.dropdown_font_var.get()), int(self.patient_font_var.get()),
+                    int(self.instruction_font_var.get()))
                 cfg.config.set_gemini(gemini_key, self.gemini_enabled_var.get())
                 document_language = {
                     "English": "en", "العربية": "ar",
@@ -8514,9 +8722,11 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         if self._active_section == "general":
             self.language_var.set("English")
-            self.dropdown_font_var.set(I.t("settings_font_default"))
-            self.patient_font_var.set("14")
+            self.dropdown_font_var.set("20")
+            self.patient_font_var.set("18")
+            self.instruction_font_var.set("18")
         elif self._active_section == "clinic":
+            self.remove_clinic_location()
             self.clinic_name_var.set("")
             self.clinic_address_var.set("")
             self.clinic_phone_var.set("")
@@ -8543,10 +8753,12 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         self.language_var.set("English")
         self.clinic_name_var.set("")
-        self.dropdown_font_var.set(I.t("settings_font_default"))
-        self.patient_font_var.set("14")
+        self.dropdown_font_var.set("20")
+        self.patient_font_var.set("18")
+        self.instruction_font_var.set("18")
         self.clinic_address_var.set("")
         self.clinic_phone_var.set("")
+        self.remove_clinic_location()
         self.logo_var.set("")
         self.paper_var.set(cfg.DEFAULT_PAPER)
         self.document_language_var.set(I.t("settings_same_as_interface"))

@@ -6,15 +6,16 @@ The desktop now uploads the new viewer contract through
 `Prescription.to_cloud_payload()`: text `doctor`/`patient`, `date`, optional entered
 `registrationId`, `phone`, `age`, and `medications` with `tradeName`, `genericName`,
 `dosage`, `instructions`, `duration`, `quantity`. Frequency and notes are combined
-as instructions. Missing values are omitted, never inferred. No coordinates are
-currently collected or uploaded.
+as instructions. Missing values are omitted, never inferred. Optional numeric
+`latitude`/`longitude` are uploaded only after enabling clinic-location inclusion
+in desktop Settings. The viewer already validates their bounds and uses them for
+its conditional Maps icon; no backend schema change is required for this feature.
 
 The new mobile layout implements legacy aliases directly. GitHub main commit
 `6e347f7b92c400fab2a9843c756ba3b5f737a67a` preserves those aliases and removes invented
-clinical/contact defaults. Production deployment verification is pending: manual
-Deploy to Production remained loading and the latest verified production source
-was still `db70bb5`. The pending Vercel form was left open. See the verification
-report for the final observed state; do not assume this correction is live yet.
+clinical/contact defaults. The subsequent read-only Vercel check confirmed this
+commit Ready in production; the fictitious viewer also showed the corrected
+conditional contact/location actions. See the verification report for evidence.
 
 The new fictitious upload and actual QR-image scan succeeded; its viewer displayed
 the entered mobile-schema values at `https://rx-v2.vercel.app/p/6c8cf6b1`.

@@ -232,6 +232,21 @@ No tooltips, clinical record changes or document-format changes are introduced.
   as CSV, XLSX, or legacy XLS.
 
 ## QR payload & viewer
+- **Settings → Clinic Identity → Clinic Location** accepts a Google Maps dropped-pin
+  link, a supported Google short link, or explicit latitude/longitude. Check and
+  confirm the pin before saving. Map-centre (`@…`) coordinates are deliberately
+  not treated as the clinic pin. Coordinates are stored in encrypted configuration.
+- **Use Current Location** opens a temporary loopback-only page in your default
+  browser. Click its location button, grant browser permission, then return to
+  confirm the clinic pin. Use it only while physically at the clinic. It does not
+  enable Windows location services, bypass permission or track continuously. The
+  page expires after two minutes; denied/unavailable location has a manual fallback.
+- **Include clinic location in cloud prescriptions** is off by default. Enabling
+  it adds validated numeric `latitude` and `longitude` to new export snapshots;
+  the cloud viewer's location icon opens that pin in Maps. Anyone holding the link
+  can see it. Removing the location also disables inclusion. Changing Settings
+  does not modify previously uploaded prescriptions. Printed Word/PDF layout and
+  the QR short-link format remain unchanged. Small Clinic Identity views can scroll.
 - Open **Settings → QR verification**, enter the cloud API key and save Settings.
   The key is masked and stored in Windows-encrypted configuration, not in the executable.
 - Export snapshots the explicit mobile-viewer JSON contract and POSTs it to
@@ -263,7 +278,28 @@ No tooltips, clinical record changes or document-format changes are introduced.
 - `drug_db.py`        – CSV drug database: load / import(replace|merge) / export / search
 - `qr_utils.py`       – prescription models + QR image generator; deprecated legacy helpers
 - `cloud_rx.py`       – authenticated cloud link client with safe errors and URL validation
+- `clinic_location.py` – clinic pin validation and permission-based loopback browser helper
 - `pdf_generator.py`  – A5/A4 full PDF + compact label PDF + Word export (Arabic-aware)
 - `main.py`           – CustomTkinter desktop GUI
 - `viewer.html`       – deprecated historical decoder, not bundled
 - `data/drugs.csv`    – seed drug database
+
+## Independent display fonts
+
+Settings → General → Display fonts contains three independent controls, each
+with every integer size **18–56** and a live preview:
+
+- Medication suggestions (default 20): medicine autocomplete in Medication Entry,
+  Favorites and Templates, plus main-search suggestions and linked trade-name lists.
+- Dose instructions (default 18): dosage, frequency, duration and notes fields,
+  including frequency/notes dropdowns in Medication Entry, Favorites and Templates.
+- Patient & doctor names (default 18): patient and prescriber name fields and
+  patient-name suggestions.
+
+Settings menus retain their fixed readable fonts; page titles, buttons, category
+filters, sorting menus and context menus do not inherit these overrides. Large
+entry fonts get sufficient field height; existing edits are preserved when applying
+preferences. These are desktop display sizes and do not change Word/PDF typography.
+Older medicine-dropdown and patient-name preferences migrate to their corresponding
+groups; values below 18 are raised to 18, and dose instructions start independently
+at 18. Defaults or invalid old values use 20/18/18. Encrypted records are preserved.

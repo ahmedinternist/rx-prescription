@@ -8,7 +8,8 @@
 - `doctor`, `patient`, `date`, `medications`; entered license, clinic phone and
   patient age are optional. Medication fields are `tradeName`, `genericName`,
   `dosage`, `instructions` (frequency plus notes), `duration` and `quantity`.
-  No local patient identifiers, full records, logo paths, keys or coordinates.
+  No local patient identifiers, full records, logo paths or keys. Clinic coordinates
+  are optional, validated and uploaded only when inclusion is explicitly enabled.
 - 15-second timeout, normal TLS verification, no automatic retries or redirects.
 - Validated HTTPS cloud `/p/` URL passed directly to the QR generator.
 - Worker upload, QR and document generation; UI-thread callback queue.
@@ -61,14 +62,41 @@ in `backend-compat/` must not be applied over that new mobile layout.
 Companion viewer correction committed to GitHub main as
 `6e347f7b92c400fab2a9843c756ba3b5f737a67a`: retain legacy v4 aliases, remove invented
 phone/license/location/dosing defaults, and hide call/map actions unless supplied
-values are valid. Production deployment verification is pending: Vercel validated
-the exact commit on main and accepted the Deploy to Production click, but its
-submission remained loading and no new deployment appeared in a separately
-loaded deployment list. Production still served `db70bb5` and its invented
-defaults at the final check. The pending deployment tab was left open for handoff.
-Do not treat the companion viewer correction as live until this commit is Ready
-and the fictitious record shows `Not provided` instead of inferred dosing, with
-no phone/map actions for its non-diallable test phone and absent coordinates.
+values are valid. A subsequent read-only check confirmed this commit Ready at
+Vercel deployment `9FG4pXxghthuw3tnQgQWwi1harAu`. Both fictitious records opened
+successfully; missing dose values showed `Not provided`, and non-diallable/absent
+phone and absent coordinates produced no call/map actions. This records the
+previous deployment check, not a new deployment during the clinic-location change.
+
+## Clinic-location addition
+
+- Compact Clinic Identity card with explicit pin links/coordinates, confirmation,
+  Maps access, permission-based current-location detection and removal.
+- Browser helper binds only to `127.0.0.1`, uses a random one-shot token,
+  same-origin/Host checks, bounded bodies, CSP, no-store/no-referrer and no request
+  logging. Location permission is requested only after a button click; Settings
+  closure cancels the session. No external scripts, geocoder or API key are used.
+- Coordinates are Windows-encrypted locally. Inclusion is off by default and
+  adds numeric top-level `latitude`/`longitude` only after explicit enablement.
+- Automated tests use fictitious pins, mocked browser permission responses and
+  isolated Settings. No real geolocation permission prompt or clinic location
+  was activated; actual browser/device accuracy still requires manual checking.
+- English and Arabic Settings screenshots captured from app-owned test windows:
+  `output/clinic-location-settings-en.png`, `output/clinic-location-settings-ar.png`.
+- Final isolated regression run: **154 passed**. Added tests cover bounds,
+  zero coordinates, explicit versus viewport pins, allowed short-link redirects,
+  offline errors, loopback Host/origin/token checks, malformed bodies, one-shot
+  responses, simulated permission errors/success, timeout/cancellation, encrypted
+  persistence, opt-in payloads, stale callbacks and export snapshot consistency.
+- Separate updated executable: `dist/ClinicLocation/RxPrescription-v4.82.exe`,
+  **42,093,840 bytes**, retaining version **4.82.0** and all previous builds.
+  Archive checks confirmed the location helper, validated-coordinate payload,
+  async cloud exports and no bundled static viewer or embedded cloud secret.
+  SHA-256: `04b1d0cb5b41868aa7366d6c9733b699e974dd97f72dc0028c88fbbe2ec3ee8d`.
+- The loopback helper's secure-context basis was checked against official
+  [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Secure_Contexts).
+  No new cloud record, backend deployment, frozen GUI launch or physical printer
+  test was performed for this addition. The earlier live QR checks remain above.
 
 Backend seven-day expiry/access policy is unchanged. Link access is not clinician
 signature verification. A shared desktop key is protected at rest, not inaccessible
