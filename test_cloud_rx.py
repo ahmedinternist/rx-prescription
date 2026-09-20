@@ -107,18 +107,20 @@ assert reloaded.data["signing_private_key"] == "old-key-preserved"
 def test_cloud_failure_choices_and_closure(tmp_path):
     run_isolated(tmp_path, '''
 from types import SimpleNamespace
-from main import App
+import main
+main.cfg.config = SimpleNamespace(cloud_rx_api_key=" refreshed-key ")
 calls=[]
 ui=SimpleNamespace(_closing=False,
     _upload_export_link=lambda op:calls.append(("retry",op)),
     _write_cloud_export=lambda op,url:calls.append(("without",op,url)),
     _set_export_busy=lambda value:calls.append(("busy",value)))
-op=object()
+op={"api_key":"stale-key"}
 for choice in ("retry","without","cancel"):
-    App._resolve_cloud_export_failure(ui,op,choice)
+    main.App._resolve_cloud_export_failure(ui,op,choice)
 assert calls == [("retry",op),("without",op,None),("busy",False)]
+assert op["api_key"] == "refreshed-key"
 ui._closing=True
-App._resolve_cloud_export_failure(ui,op,"retry")
+main.App._resolve_cloud_export_failure(ui,op,"retry")
 assert len(calls)==3
 ''')
 

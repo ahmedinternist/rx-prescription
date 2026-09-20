@@ -912,7 +912,7 @@ def test_visual_layout_constants_are_compact_and_consistent():
     assert LIST_FONT == ("Segoe UI", 30)
     assert PAGE_TITLE_FONT_SIZE == 35
     assert SELECTED_MEDICINE_FONT_SIZE == 35
-    assert APP_VERSION == "5"
+    assert APP_VERSION == "5.1"
     assert DASHBOARD_WIDTH < 210
     assert 'pady=(0, 3)' in inspect.getsource(App.page_header)
     assert 'pady=(8, 12)' in inspect.getsource(SettingsWindow._new_page)

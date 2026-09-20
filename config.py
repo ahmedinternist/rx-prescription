@@ -15,7 +15,7 @@ from typing import Any, Dict
 
 from security import DataProtectionError, protect, unprotect
 
-APP_VERSION = "5"
+APP_VERSION = "5.1"
 RECOVERY_RETENTION_DAYS = 30
 # ISO portrait sizes in points: A5 is exactly 148 × 210 mm, A4 210 × 297 mm.
 PAPER_SIZES: Dict[str, tuple[float, float]] = {

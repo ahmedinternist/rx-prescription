@@ -8273,7 +8273,7 @@ class App(ctk.CTk):
             messagebox.showerror(I.t("location_title"), I.t("location_invalid"), parent=self)
             return None
         operation = {"rx": rx, "document": document, "payload": payload,
-                     "api_key": cfg.config.cloud_rx_api_key, "action": action,
+                     "api_key": cfg.config.cloud_rx_api_key.strip(), "action": action,
                      "path_pdf": path_pdf, "path_docx": path_docx,
                      "compact": compact, "on_success": on_success}
         self._set_export_busy(True)
@@ -8349,6 +8349,9 @@ class App(ctk.CTk):
         if self._closing:
             return
         if choice == "retry":
+            # The user may have corrected and saved the key after the failed
+            # request. Refresh it instead of reusing the stale export snapshot.
+            operation["api_key"] = cfg.config.cloud_rx_api_key.strip()
             self._upload_export_link(operation)
         elif choice == "without":
             self._write_cloud_export(operation, None)
@@ -9391,7 +9394,7 @@ class SettingsWindow(ctk.CTkToplevel):
                                       phone=self.clinic_phone_var.get().strip(),
                                       logo_path=logo_path, latitude=latitude, longitude=longitude,
                                       include_location=bool(self.include_location_var.get()))
-                cfg.config.cloud_rx_api_key = self.cloud_key_var.get()
+                cfg.config.cloud_rx_api_key = self.cloud_key_var.get().strip()
                 cfg.config.paper_size = self.paper_var.get()
                 cfg.config.language = language
                 cfg.config.set_ui_font_sizes(
