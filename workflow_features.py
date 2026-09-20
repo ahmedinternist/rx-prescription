@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -42,6 +44,109 @@ def compare_prescriptions(current: list[Any], previous: list[Any]) -> dict[str, 
         if key not in current_map:
             result["removed"].append(as_dict(item))
     return result
+
+
+@dataclass(frozen=True)
+class WorkflowIssue:
+    """A clinician-facing validation result with explicit severity."""
+
+    severity: str
+    field: str
+    message: str
+
+
+def medicine_present(item: Any) -> bool:
+    """Return True when a row has either a trade or scientific medicine name."""
+    get = item.get if isinstance(item, dict) else lambda key, default="": getattr(item, key, default)
+    return bool(str(get("brand_name", "") or "").strip()
+                or str(get("generic_name", "") or "").strip())
+
+
+def compact_medicine_summary(item: Any) -> str:
+    """Build the one-line summary used by collapsed medication rows."""
+    get = item.get if isinstance(item, dict) else lambda key, default="": getattr(item, key, default)
+    brand = str(get("brand_name", "") or "").strip()
+    scientific = str(get("generic_name", "") or "").strip()
+    if brand and scientific and brand.casefold() != scientific.casefold():
+        name = f"{brand}  ·  {scientific}"
+    else:
+        name = brand or scientific or "—"
+    details = [str(get(key, "") or "").strip()
+               for key in ("dosage", "frequency", "duration", "notes", "quantity")]
+    details = [value for value in details if value]
+    return name + (("   ·   " + "   ·   ".join(details)) if details else "")
+
+
+def validate_prescription_workflow(patient: Any, medicines: list[Any]) -> list[WorkflowIssue]:
+    """Validate entry completeness without making clinical decisions.
+
+    Blocking errors are structural only.  Missing regimen details remain warnings;
+    the clinician can still continue after reviewing them.
+    """
+    get_patient = (patient.get if isinstance(patient, dict)
+                   else lambda key, default="": getattr(patient, key, default))
+    issues: list[WorkflowIssue] = []
+    if not str(get_patient("name", "") or "").strip():
+        issues.append(WorkflowIssue("error", "patient.name", "Patient name is required."))
+    present = [item for item in medicines if medicine_present(item)]
+    if not present:
+        issues.append(WorkflowIssue("error", "medicines", "Add at least one medicine."))
+        return issues
+    for index, item in enumerate(present, 1):
+        get = item.get if isinstance(item, dict) else lambda key, default="": getattr(item, key, default)
+        for key, label in (("dosage", "dosage"), ("frequency", "frequency"),
+                           ("duration", "duration")):
+            if not str(get(key, "") or "").strip():
+                issues.append(WorkflowIssue(
+                    "warning", f"medicines.{index}.{key}",
+                    f"Medicine {index} has no {label}."))
+    return issues
+
+
+def workflow_step(patient: Any, medicines: list[Any], view: str = "entry") -> int:
+    """Return the visible 1-based Patient/Medicines/Review/Export step."""
+    if view == "export":
+        return 4
+    if view == "review":
+        return 3
+    get = patient.get if isinstance(patient, dict) else lambda key, default="": getattr(patient, key, default)
+    return 2 if str(get("name", "") or "").strip() else 1
+
+
+def prescription_draft(patient: Any, medicines: list[Any], *, active_page="patient") -> dict:
+    """Create a minimal local resume snapshot without changing export schemas."""
+    if isinstance(patient, dict):
+        patient_data = {key: str(patient.get(key, "") or "")
+                        for key in ("name", "age", "sex", "id")}
+    else:
+        patient_data = {key: str(getattr(patient, key, "") or "")
+                        for key in ("name", "age", "sex", "id")}
+    fields = ("generic_name", "brand_name", "dosage", "frequency",
+              "duration", "notes", "quantity")
+    medicine_data = []
+    for item in medicines:
+        get = item.get if isinstance(item, dict) else lambda key, default="": getattr(item, key, default)
+        values = {key: str(get(key, "") or "") for key in fields}
+        if medicine_present(values):
+            medicine_data.append(values)
+    return {
+        "schema": 1,
+        "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "active_page": active_page if active_page in {"patient", "medications"} else "patient",
+        "patient": patient_data,
+        "medicines": medicine_data,
+    }
+
+
+def valid_prescription_draft(value: Any) -> bool:
+    """Accept only the small, versioned local draft shape."""
+    if not isinstance(value, dict) or value.get("schema") != 1:
+        return False
+    if not isinstance(value.get("patient"), dict) or not isinstance(value.get("medicines"), list):
+        return False
+    return bool(str(value["patient"].get("name", "") or "").strip()
+                or any(medicine_present(item) for item in value["medicines"]
+                       if isinstance(item, dict)))
 
 
 def _quantity_unit_from_form(form: str) -> str:

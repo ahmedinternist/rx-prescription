@@ -396,12 +396,22 @@ saved = Config().treatment_templates()
 assert len(saved) == 1
 assert saved[0]["disease"] == "Hypertension"
 assert saved[0]["variant"] == "Initial therapy"
+assert saved[0]["use_count"] == 0
+assert saved[0]["created_at"]
+assert saved[0]["updated_at"]
 assert saved[0]["medications"][0]["generic_name"] == "Drug A"
 assert saved[0]["medications"][1]["alternative_to_previous"] is True
 assert "Hypertension" not in CONFIG_PATH.read_text(encoding="utf-8")
+created_at = saved[0]["created_at"]
 saved[0]["medications"][0]["dosage"] = "10 mg"
 assert config.save_treatment_template(saved[0]) == template_id
-assert Config().treatment_templates()[0]["medications"][0]["dosage"] == "10 mg"
+updated = Config().treatment_templates()[0]
+assert updated["medications"][0]["dosage"] == "10 mg"
+assert updated["created_at"] == created_at
+assert config.record_treatment_template_use(template_id)
+used = Config().treatment_templates()[0]
+assert used["use_count"] == 1
+assert used["last_used"]
 backup = CONFIG_PATH.parent / "templates.rxtemplates"
 config.export_treatment_templates(str(backup))
 assert "Hypertension" not in backup.read_text(encoding="utf-8")
@@ -553,19 +563,40 @@ def test_treatment_template_split_views_preserve_record_actions():
     import inspect
     from main import App
     browser = inspect.getsource(App.refresh_saved_treatment_templates)
-    assert "sorted(cfg.config.treatment_templates()" in browser
-    assert "use_saved_treatment_template" in browser
-    assert "edit_saved_treatment_template" in browser
-    assert "delete_saved_treatment_template" in browser
-    assert "toggle_saved_treatment_template" in browser
+    card = inspect.getsource(App._build_saved_treatment_card)
+    sorter = inspect.getsource(App._sort_saved_treatment_templates)
+    reflow = inspect.getsource(App._reflow_saved_template_cards)
+    scheduler = inspect.getsource(App._schedule_saved_treatment_refresh)
+    state = inspect.getsource(App._capture_saved_template_state)
+    assert "cfg.config.treatment_templates()" in browser
+    assert "use_saved_treatment_template" in card
+    assert "edit_saved_treatment_template" in card
+    assert "delete_saved_treatment_template" in card
+    assert "toggle_saved_treatment_template" in card
+    assert 'template["medications"] if expanded else []' in card
+    assert 'I.t("treatment_more_medicines"' not in card
+    assert 'text="⌄" if expanded else "›"' in card
+    assert 'command=toggle' in card
+    assert 'for widget in (card, header, count)' not in card
+    assert "columns = 2 if width >= 900 else 1" in reflow
+    assert 'mode == "recently_used"' in sorter
+    assert 'mode == "recently_modified"' in sorter
+    assert 'mode == "name_reverse"' in sorter
+    assert "use_count" in sorter
+    assert "self.after(" in scheduler
+    assert '"query"' in state and '"sort"' in state and '"scroll"' in state
     assert "_treatment_saved_limit" in browser
-    assert "show_treatment_saved_templates(selected_id=saved_id)" in inspect.getsource(App.save_treatment_template)
+    save_source = inspect.getsource(App.save_treatment_template)
+    assert "show_treatment_saved_templates(" in save_source
+    assert "selected_id=saved_id, restore_state=restore_state" in save_source
     assert "_confirm_treatment_leave" in inspect.getsource(App.show_page)
     assert "_confirm_treatment_leave" in inspect.getsource(App.confirm_close)
     deletion = inspect.getsource(App.delete_saved_treatment_template)
     assert deletion.index("askyesno") < deletion.index("remove_treatment_template")
     assert "add_recovery_item" in deletion
     assert 'medicines=template["medications"]' in inspect.getsource(App.use_saved_treatment_template)
+    assert "record_treatment_template_use" in inspect.getsource(
+        App._apply_treatment_selection)
 
 
 def test_treatment_template_dashboard_page_uses_current_drug_database():
@@ -589,8 +620,9 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
     write_source = inspect.getsource(App._write_treatment_templates_file)
     import_source = inspect.getsource(App.import_treatment_templates_xlsx)
     parse_source = inspect.getsource(App._read_treatment_templates_file)
-    assert ui_source.index('_add_page_button("drug_classes"') < ui_source.index(
-        '_add_page_button("treatment_templates"')
+    assert ui_source.index('_add_page_button("favorites"') < ui_source.index(
+        '_add_page_button("treatment_templates"') < ui_source.index(
+            '_add_dashboard_group(I.t("nav_clinical_reference")')
     assert '"treatment_templates": ctk.CTkFrame' in forms_source
     assert "treatment_disease_var" in page_source
     assert "treatment_variant_var" not in page_source
@@ -616,7 +648,7 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
     assert "treatment_editor_view" in page_source
     assert "treatment_saved_view" in page_source
     assert "treatment_saved_search_var" in page_source
-    assert 'text="💾"' in page_source
+    assert 'image=action_icon("save")' in page_source
     assert 'text="🗑"' in page_source
     assert page_source.count('fg_color="transparent"') >= 4
     assert page_source.count("border_width=0") >= 2
@@ -658,7 +690,12 @@ def test_treatment_template_dashboard_page_uses_current_drug_database():
                     "treatment_search_database", "treatment_use_rx",
                     "treatment_apply_preview",
                     "treatment_export_database", "treatment_import_database",
-                    "treatment_no_template_match"):
+                    "treatment_no_template_match",
+                    "treatment_saved_empty_none",
+                    "treatment_saved_empty_search",
+                    "treatment_sort_used", "treatment_sort_recent",
+                    "treatment_sort_modified", "treatment_sort_name",
+                    "treatment_sort_name_reverse"):
             assert I.t(key)
     I.set_lang("en")
 
@@ -865,6 +902,7 @@ def test_notes_picker_has_the_requested_administration_presets():
 
 def test_visual_layout_constants_are_compact_and_consistent():
     import inspect
+    from config import APP_VERSION
     from main import (ACTION_HEIGHT, DASHBOARD_WIDTH, FIELD_HEIGHT, LIST_FONT,
                       PAGE_TITLE_FONT_SIZE, SELECTED_MEDICINE_FONT_SIZE,
                       App, SettingsWindow)
@@ -874,6 +912,7 @@ def test_visual_layout_constants_are_compact_and_consistent():
     assert LIST_FONT == ("Segoe UI", 30)
     assert PAGE_TITLE_FONT_SIZE == 35
     assert SELECTED_MEDICINE_FONT_SIZE == 35
+    assert APP_VERSION == "5"
     assert DASHBOARD_WIDTH < 210
     assert 'pady=(0, 3)' in inspect.getsource(App.page_header)
     assert 'pady=(8, 12)' in inspect.getsource(SettingsWindow._new_page)
@@ -1016,8 +1055,10 @@ def test_export_patient_and_favorite_actions_use_compact_requested_layout():
     assert "command=self.print_pdf" not in ui_source
     assert I.STRINGS["en"]["export_word"] == "Export Word with Header"
     assert I.STRINGS["en"]["export_compact"] == "Export to Word without Header"
-    assert forms_source.index('text="＋"') < forms_source.index('text="💾"')
-    assert forms_source.index('text="💾"') < forms_source.index('text="🗑"')
+    assert forms_source.index('patient_actions, text="＋"') < forms_source.index(
+        'patient_actions, text="", image=action_icon("save")')
+    assert forms_source.index('patient_actions, text="", image=action_icon("save")') < forms_source.index(
+        'patient_actions, text="🗑"')
     assert 'text=I.t("patient_action_clear")' not in forms_source
     assert 'actions, text="", image=_edit_icon(18)' in favorite_source
     assert 'actions, text="🗑"' in favorite_source
@@ -1081,7 +1122,8 @@ def test_shared_edit_artwork_has_transparency_and_is_used_on_all_edit_buttons():
         assert artwork.getpixel((0, 0))[3] == 0
     source = inspect.getsource(main)
     assert 'text="✎"' not in source
-    assert source.count('image=_edit_icon(') == 3
+    # The shared transparent artwork is also used by collapsed medicine rows.
+    assert source.count('image=_edit_icon(') == 4
 
 
 def test_medication_favorite_picker_and_collapsible_line_preview():
@@ -1137,6 +1179,9 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     cache_source = inspect.getsource(App._ensure_classification_cache)
     save_source = inspect.getsource(App.save_class_mapping)
     integrity_source = inspect.getsource(App.class_mapping_integrity)
+    capture_state_source = inspect.getsource(App._capture_class_overview_state)
+    restore_state_source = inspect.getsource(App._restore_class_overview_state)
+    back_detail_source = inspect.getsource(App.back_to_subclass_page)
     assert "self.class_breadcrumb" in form_source
     assert "self.class_group_list" in form_source
     assert "self.class_detail_list" in form_source
@@ -1153,11 +1198,16 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     assert "show_subclass_page" in breadcrumb_source
     assert "show_detail_medicines_page" in breadcrumb_source
     assert "show_detail_medicines_page" in group_page_source
-    assert 'bind(\n                "<Double-Button-1>"' in group_page_source
+    assert 'text="›"' in group_page_source
+    assert '"<Double-Button-1>"' not in group_page_source
+    assert 'row=index // 2, column=index % 2' in group_page_source
+    assert "_subclass_scroll_position" in group_page_source
     assert 'I.t("back")' in detail_page_source
     assert "_drugs_in_class" in detail_page_source
-    assert "command=self.back_to_major_groups" in detail_page_source
+    assert "back_to_subclass_page" in detail_page_source
     assert 'text="+"' in detail_page_source
+    assert 'I.t("medicine_count"' in detail_page_source
+    assert 'I.t("mapped_medicine_count"' not in detail_page_source
     assert "_attach_class_tooltip" not in detail_page_source
     assert "toggle_detail_drug_creator" in detail_page_source
     assert "save_detail_class_medicine" in detail_page_source
@@ -1219,8 +1269,12 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     assert "right = ctk.CTkScrollableFrame" not in mapping_source
     assert 'text=I.t("mapping_selected_medicine")' not in mapping_source
     assert 'pady=(10, 8)' in mapping_source
-    assert 'text=I.t("show_suggested")' in mapping_source
-    assert 'text=I.t("show_mapping_variations")' in mapping_source
+    assert 'self.mapping_filter_buttons' in mapping_source
+    assert '("all", I.t("mapping_filter_all"))' in mapping_source
+    assert '("suggested", I.t("classification_suggested"))' in mapping_source
+    assert '("conflicting", I.t("classification_conflicting"))' in mapping_source
+    assert 'font=("Segoe UI", -15)' in mapping_source
+    assert "CTkCheckBox(\n            mapping_filters" not in mapping_source
     assert "mapping_filters" in mapping_source
     assert 'cache["suggested"]' in mapping_refresh_source
     assert 'cache["variations"]' in mapping_refresh_source
@@ -1234,7 +1288,16 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
     assert "class_mapping_hint" not in mapping_source
     assert "update_drug_classifications" in save_source
     assert "classification_states_for_drugs" in save_source
+    assert "previous_scroll" in save_source
+    assert 'filter_mode == "all"' in save_source
     assert "_mapping_target_identity" in mapping_source
+    assert '"group_scroll"' in capture_state_source
+    assert '"detail_scroll"' in capture_state_source
+    assert "class_search_var" in capture_state_source
+    assert "refresh_class_browser" in restore_state_source
+    assert "yview_moveto" in restore_state_source
+    assert 'target == "all"' in back_detail_source
+    assert 'target == "overview"' in back_detail_source
     assert "invalid_groups" in integrity_source
     assert "invalid_details" in integrity_source
     assert "variations" in integrity_source
@@ -1248,7 +1311,9 @@ def test_drug_class_two_panel_browser_batch_review_and_integrity_controls():
                     "class_iv_fluids_devices", "classification_confirmed",
                     "classification_suggested", "filter_all_groups",
                     "context_edit_mapping", "import_classification_assistant",
-                    "show_mapping_variations", "classification_unrecognized",
+                    "show_mapping_variations", "mapping_filter_all",
+                    "classification_conflicting",
+                    "classification_unrecognized",
                     "add_drug_tooltip",
                     "load_more", "class_delete_drug",
                     "class_delete_drug_confirm", "class_delete_drug_failed"):
@@ -1468,20 +1533,34 @@ def test_patient_page_has_compact_two_column_layout_and_expandable_history():
     assert form_source.count('I.t("save_profile")') == 1
 
 
-def test_quick_prescribe_autocomplete_uses_large_result_menu():
+def test_global_quick_prescribe_bar_is_removed_but_settings_search_remains():
     import inspect
-    from main import App
+    from main import App, SettingsWindow
 
-    source = inspect.getsource(App._render_quick_results)
-    assert "height=min(10, len(results))" in source
-    assert "fit_autocomplete_popup" in source
-    assert '("Segoe UI", 21)' in source
-    assert 'self._quick_search_bar, box, len(results), align_anchor=True' in source
-    assert 'measure_content=True' in source
-    assert 'width_multiplier=2' in source
-    assert 'cap_width=False' in source
-    assert "after(6000, self._expire_quick_results)" in source
-    assert "_quick_click_outside" in inspect.getsource(App._build_quick_prescribe)
+    source = inspect.getsource(App)
+    assert "_build_quick_prescribe" not in source
+    assert "quick_prescribe_entry" not in source
+    assert "<Control-k>" not in source
+    assert "settings_search_entry" in inspect.getsource(SettingsWindow)
+
+
+def test_export_workflow_step_turns_green_after_success():
+    from main import App, PRIMARY
+
+    class Button:
+        def __init__(self, text):
+            self.options = {"text": text}
+        def configure(self, **kwargs):
+            self.options.update(kwargs)
+        def cget(self, key):
+            return self.options[key]
+
+    buttons = [Button(f"{index}  Step {index}") for index in range(1, 5)]
+    App._style_workflow_bar(buttons, 4, False)
+    assert buttons[3].cget("fg_color") == PRIMARY
+    App._style_workflow_bar(buttons, 4, True)
+    assert buttons[3].cget("fg_color") == "#dff4f0"
+    assert buttons[3].cget("text").startswith("✓")
 
 
 def test_autocomplete_layout_fits_screen_and_uses_only_needed_rows():
@@ -1514,7 +1593,7 @@ def test_refined_typography_spacing_and_sidebar_selection():
     assert 'sticky="new", padx=CARD_GAP, pady=CARD_GAP' in inspect.getsource(App._render_favorite_card)
     assert "_selection_indicator" in inspect.getsource(App.show_page)
     assert "fg_color=NAV_ACTIVE_SOFT if name == key" in inspect.getsource(App.show_page)
-    for method in (DrugRow._show_ac, App._show_favorite_autocomplete, App._render_quick_results):
+    for method in (DrugRow._show_ac, App._show_favorite_autocomplete):
         assert "fit_autocomplete_popup" in inspect.getsource(method)
 
 
@@ -1534,7 +1613,7 @@ def test_medication_secondary_tools_use_exclusive_subpages():
             self.options.update(kwargs)
 
     ui = SimpleNamespace(
-        rows=[], _hide_quick_results=lambda: None,
+        rows=[],
         medication_main=Widget(), medication_subpage=Widget(),
         medication_favorite_panel=Widget(), word_preview_section=Widget(),
         word_preview_body=Widget(), medication_subpage_title=Widget(),
@@ -2334,11 +2413,6 @@ for row in app.rows:
     assert row.freq_entry.cget("border_color") == LINE
 assert app.medication_favorites_button.cget("fg_color") == SURFACE
 assert app.word_preview_toggle.cget("fg_color") == SURFACE
-assert app.quick_prescribe_var.get() == ""
-assert app.quick_prescribe_entry._search_hint.winfo_manager() == "place"
-app.quick_prescribe_var.set("Brand")
-assert not app.quick_prescribe_entry._search_hint.winfo_manager()
-app.quick_prescribe_var.set("")
 settings = SettingsWindow(app)
 settings.withdraw()
 settings._show_section("clinic")
@@ -2501,8 +2575,6 @@ assert app.rows[0].freq_entry.cget("dropdown_font").cget("size") == 18
 assert popup.cget("font") == str(_ui_font(20))
 assert app.patient_name_entry.cget("height") == max(
     FIELD_HEIGHT, app.patient_name_entry.cget("font").metrics("linespace") + 12)
-assert int(app.quick_prescribe_entry.pack_info()["pady"]) == round(4 * app.quick_prescribe_entry._get_widget_scaling())
-assert app.quick_prescribe_entry.master.winfo_children()[0].cget("image") is not None
 settings = SettingsWindow(app)
 settings.withdraw()
 settings.dropdown_font_var.set("32")
@@ -2636,17 +2708,16 @@ top.overrideredirect(True)
 box = PopupListbox(top, width=8, font=("Segoe UI", 16))
 item = "Longer brand and scientific name, dose and duration"
 box.insert(tk.END, item)
-fit_autocomplete_popup(top, app._quick_search_bar, box, 1, align_anchor=True, measure_content=True)
+fit_autocomplete_popup(top, app.treatment_saved_view, box, 1, align_anchor=True, measure_content=True)
 app.update()
 font = tkfont.Font(root=app, font=box.cget("font"))
 assert top.winfo_width() >= font.measure(item) + 36, (top.winfo_width(), font.measure(item), top.winfo_rootx(), top.winfo_screenwidth())
-assert top.winfo_rootx() == app._quick_search_bar.winfo_rootx()
 top.destroy()
 top = tk.Toplevel(app)
 top.overrideredirect(True)
 box = PopupListbox(top, width=8, font=("Segoe UI", 56))
 box.insert(tk.END, "Very long medicine label " * 12)
-fit_autocomplete_popup(top, app._quick_search_bar, box, 1, align_anchor=True, measure_content=True)
+fit_autocomplete_popup(top, app.treatment_saved_view, box, 1, align_anchor=True, measure_content=True)
 app.update()
 assert box.cget("xscrollcommand")
 assert top.winfo_rootx() + top.winfo_width() <= top.winfo_screenwidth() - 10

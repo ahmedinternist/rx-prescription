@@ -1,5 +1,15 @@
 # Glass dashboard refinement plan
 
+## Version 5 compact template browsing — 2026-09-19
+
+The global Quick Prescription search is removed from the main application shell;
+Settings keeps its own scoped search. Saved Treatment Template cards default to a
+header-only collapsed state and reveal medicines only from the disease title or
+chevron. A single expanded-card model prevents the library from growing vertically.
+The prescription workflow continues to use blue for the active step and reserved
+success green for completed steps; Export becomes green only after a document is
+generated successfully.
+
 ## Cloud QR Settings and export states — 2026-09-18
 
 Reference lock: preserve the existing compact Clinical Glass Settings cards,
@@ -94,7 +104,7 @@ even when a linked-brand picker opens. Favorites and Template toolbars share
 white sheet. Neutral entry/dropdown borders turn blue on focus without resizing;
 validation colors and existing input bindings are preserved. No tooltips are added.
 
-Scope: visual only, v4.82.0 retained; no record or export-format changes.
+Scope: visual only, v5 retained; no record or export-format changes.
 
 Verification: 78 automated checks passed, including action command retention,
 star state changes, color-only focus geometry and preservation of validation
@@ -105,7 +115,7 @@ reviewed. Testing does not access the user's live records.
 ## Approved Medication Entry and Settings implementation — 2026-09-17
 
 Build target: the two Clinical Glass mockups approved by the user. The app
-remains v4.82.0; this change does not alter records or prescription output.
+remains v5; this change does not alter records or prescription output.
 The user's Care reference owns the white/light-gray canvas, blue accents,
 charcoal type and compact rounded panels. Earlier Linear settings research
 contributes grouping only; Healthie workflow research contributes separation
@@ -244,7 +254,7 @@ profile imagery or large decorative spaces.
 2. Refine search, medication cards and action surfaces without changing commands.
 3. Apply approved component styling to Favorites, Drug Classes, Treatment
    Template, Patient/Prescriber pages, reference cards and Settings.
-4. Verify visual readability and screen-fit before rebuilding v4.82.
+4. Verify visual readability and screen-fit before rebuilding v5.
 
 ## Rendering constraints
 
@@ -284,3 +294,23 @@ Verification: 75 automated tests and 136 hidden page/section checks passed
 unavailable because the computer-use helper reported a window ownership
 mismatch. These checks do not certify pixel layout on every display or Windows
 version. The effect remains simulated glass, not real desktop transparency.
+
+## Continuous prescription workflow — 2026-09-19
+
+The prescribing path is intentionally linear and resumable: Patient → Medicines
+→ Review → Export. Both entry pages use the same progress control and retain a
+small patient/medicine summary so clinicians do not have to remember context.
+The active page exposes one visually primary next action; secondary tools remain
+available but visually quiet.
+
+Long prescriptions use progressive disclosure. The active medication remains
+expanded, while completed rows collapse into a one-line brand/scientific/regimen
+summary. Review blocks only structural omissions (patient or medicine name) and
+shows missing dose/frequency/duration as confirmable warnings. Quantity explicitly
+reports automatic versus clinician-adjusted state.
+
+An unfinished prescription is stored in the existing Windows-encrypted settings
+as a minimal versioned draft. On restart the user can resume or discard it. The
+draft is removed after a successful patient-prescription save and does not alter
+Word, PDF, QR, patient-history, or database schemas. No tooltips or keyboard-
+shortcuts page were added.

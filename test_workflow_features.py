@@ -1,4 +1,12 @@
-from workflow_features import calculate_medicine_quantity, compare_prescriptions
+from workflow_features import (
+    calculate_medicine_quantity,
+    compact_medicine_summary,
+    compare_prescriptions,
+    prescription_draft,
+    valid_prescription_draft,
+    validate_prescription_workflow,
+    workflow_step,
+)
 from patient_history import PatientHistory
 
 
@@ -52,3 +60,43 @@ def test_recovery_bin_is_encrypted_and_removable(tmp_path, monkeypatch):
     assert "Aspirin" not in (tmp_path / "config.json").read_text(encoding="utf-8")
     assert local.discard_recovery_item(item_id)
     assert local.recovery_items() == []
+
+
+def test_compact_summary_preserves_brand_scientific_and_regimen_order():
+    summary = compact_medicine_summary({
+        "brand_name": "Glucophage", "generic_name": "Metformin",
+        "dosage": "500 mg", "frequency": "1x2 (BID)",
+        "duration": "30 days", "notes": "بعد الطعام", "quantity": "60 tablets",
+    })
+    assert summary.startswith("Glucophage  ·  Metformin")
+    assert summary.index("500 mg") < summary.index("1x2 (BID)")
+    assert "بعد الطعام" in summary
+
+
+def test_workflow_validation_separates_blocking_errors_from_warnings():
+    issues = validate_prescription_workflow(
+        {"name": "أحمد علي"},
+        [{"brand_name": "Amaryl", "generic_name": "Glimepiride"}],
+    )
+    assert not [issue for issue in issues if issue.severity == "error"]
+    assert {issue.field for issue in issues if issue.severity == "warning"} == {
+        "medicines.1.dosage", "medicines.1.frequency", "medicines.1.duration"}
+    missing = validate_prescription_workflow({}, [])
+    assert {issue.field for issue in missing if issue.severity == "error"} == {
+        "patient.name", "medicines"}
+
+
+def test_draft_round_trip_keeps_minimal_unicode_snapshot():
+    draft = prescription_draft(
+        {"name": "أحمد علي", "age": "40", "sex": "M", "id": "patient-1"},
+        [{"brand_name": "دواء", "generic_name": "Medicine", "notes": "مع الطعام"}],
+        active_page="medications",
+    )
+    assert valid_prescription_draft(draft)
+    assert draft["schema"] == 1
+    assert draft["patient"]["name"] == "أحمد علي"
+    assert draft["medicines"][0]["notes"] == "مع الطعام"
+    assert draft["active_page"] == "medications"
+    assert workflow_step(draft["patient"], draft["medicines"]) == 2
+    assert workflow_step(draft["patient"], draft["medicines"], "review") == 3
+    assert workflow_step(draft["patient"], draft["medicines"], "export") == 4

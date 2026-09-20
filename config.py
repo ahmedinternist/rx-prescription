@@ -15,7 +15,7 @@ from typing import Any, Dict
 
 from security import DataProtectionError, protect, unprotect
 
-APP_VERSION = "4.82.0"
+APP_VERSION = "5"
 RECOVERY_RETENTION_DAYS = 30
 # ISO portrait sizes in points: A5 is exactly 148 × 210 mm, A4 210 × 297 mm.
 PAPER_SIZES: Dict[str, tuple[float, float]] = {
@@ -72,6 +72,7 @@ def _default_config() -> Dict[str, Any]:
         "gemini_api_key": "",
         "gemini_last_test": "",
         "openfda_cache": {},
+        "prescription_draft": {},
         "document_defaults": {
             "language": "interface", "show_header": True,
             "logo_size": "medium", "margin_mm": 16,
@@ -115,6 +116,7 @@ class Config:
         self.data.setdefault("gemini_api_key", "")
         self.data.setdefault("gemini_last_test", "")
         self.data.setdefault("openfda_cache", {})
+        self.data.setdefault("prescription_draft", {})
         self.data.setdefault("document_defaults", {
             "language": "interface", "show_header": True,
             "logo_size": "medium", "margin_mm": 16,
@@ -423,9 +425,11 @@ class Config:
 
     # -- treatment templates ----------------------------------------------
     @staticmethod
-    def _clean_treatment_template(item: Dict[str, Any], existing=None) -> Dict[str, Any]:
+    def _clean_treatment_template(item: Dict[str, Any], existing=None,
+                                  touch_updated: bool = False) -> Dict[str, Any]:
         """Normalize one disease template before encrypted local storage."""
         existing = existing or {}
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         medications = []
         for raw in item.get("medications", existing.get("medications", [])):
             if not isinstance(raw, dict):
@@ -439,12 +443,25 @@ class Config:
                 raw.get("alternative_to_previous", False)) and bool(medications)
             if medicine["generic_name"] or medicine["brand_name"]:
                 medications.append(medicine)
+        try:
+            use_count = max(0, int(item.get(
+                "use_count", existing.get("use_count", 0)) or 0))
+        except (TypeError, ValueError):
+            use_count = 0
+        created_at = str(item.get(
+            "created_at", existing.get("created_at", ""))).strip()
+        updated_at = str(item.get(
+            "updated_at", existing.get("updated_at", ""))).strip()
         return {
             "id": str(item.get("id", existing.get("id", ""))).strip() or uuid.uuid4().hex,
             "disease": str(item.get("disease", existing.get("disease", ""))).strip(),
             "variant": str(item.get("variant", existing.get("variant", ""))).strip(),
             "medications": medications,
-            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "created_at": created_at or now,
+            "updated_at": now if touch_updated else (updated_at or created_at or now),
+            "last_used": str(item.get(
+                "last_used", existing.get("last_used", ""))).strip(),
+            "use_count": use_count,
         }
 
     def treatment_templates(self) -> list[Dict[str, Any]]:
@@ -454,10 +471,14 @@ class Config:
                 and str(item.get("disease", "")).strip()]
 
     def save_treatment_template(self, item: Dict[str, Any]) -> str:
-        cleaned = self._clean_treatment_template(item)
+        templates = self.treatment_templates()
+        template_id = str(item.get("id", "")).strip()
+        previous = next((entry for entry in templates
+                         if entry["id"] == template_id), None)
+        cleaned = self._clean_treatment_template(
+            item, previous or item, touch_updated=True)
         if not cleaned["disease"] or not cleaned["medications"]:
             return ""
-        templates = self.treatment_templates()
         for index, existing in enumerate(templates):
             if existing["id"] == cleaned["id"]:
                 templates[index] = cleaned
@@ -470,7 +491,7 @@ class Config:
 
     def merge_treatment_templates(self, items, replace: bool = False) -> int:
         """Import editable templates, updating matching diseases without duplicates."""
-        imported = [self._clean_treatment_template(item)
+        imported = [self._clean_treatment_template(item, item, touch_updated=True)
                     for item in items if isinstance(item, dict)]
         imported = [item for item in imported
                     if item["disease"] and item["medications"]]
@@ -487,13 +508,31 @@ class Config:
                 if key in positions:
                     index = positions[key]
                     item["id"] = merged[index]["id"]
-                    merged[index] = item
+                    item["created_at"] = merged[index].get("created_at", "")
+                    item["last_used"] = merged[index].get("last_used", "")
+                    item["use_count"] = merged[index].get("use_count", 0)
+                    merged[index] = self._clean_treatment_template(
+                        item, merged[index], touch_updated=True)
                 else:
                     positions[key] = len(merged)
                     merged.append(item)
         self.data["treatment_templates"] = merged
         self.save()
         return len(imported)
+
+    def record_treatment_template_use(self, template_id: str) -> bool:
+        """Record a successful application without changing clinical content."""
+        templates = self.treatment_templates()
+        for template in templates:
+            if template["id"] != template_id:
+                continue
+            template["use_count"] = int(template.get("use_count", 0)) + 1
+            template["last_used"] = datetime.now(timezone.utc).isoformat(
+                timespec="seconds")
+            self.data["treatment_templates"] = templates
+            self.save()
+            return True
+        return False
 
     def remove_treatment_template(self, template_id: str) -> bool:
         templates = self.treatment_templates()

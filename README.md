@@ -36,7 +36,7 @@ as **Free mode — not web-grounded**; no source links are claimed in that mode.
 ```powershell
 powershell -ExecutionPolicy Bypass -File build_exe.ps1
 ```
-The output is `dist/RxPrescription.exe`. Building requires a full Windows
+The output is `dist/RxPrescription-v5.exe`. Building requires a full Windows
 Python installation with Tcl/Tk; the script stops early if Tk cannot open.
 
 ## Safety, privacy, and QR verification
@@ -69,15 +69,14 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   weak cache includes position, dimensions and tint; hidden/off-screen panels
   release their images. Scrolling and resizing are debounced, with no live blur
   or animation loop. Search focus changes its outline without shifting geometry.
-  This styling does not change prescriptions, exports or saved data (v4.82).
+  This styling does not change prescriptions, exports or saved data (v5).
 - **Refined compact controls** — favorite cards retain their natural height;
   brand inputs are bold, scientific inputs regular, and field labels subdued.
   Dashboard and Settings share 24 px rounded line icons, blue when inactive and
   teal when selected, with a pale teal selection and fixed slim indicator.
   Settings keeps its existing ungrouped section order, uses compact navigation
   rows with stationary hover feedback, and neutral borderless content cards.
-  Medicine and quick
-  search popups fit the screen above/below their field, reserve only the needed
+  Medicine autocomplete popups fit the screen above/below their field, reserve only the needed
   result rows, and scroll for longer lists. Existing keyboard selection remains.
 - **Medication tools subpages** — Starred Drugs and Word Preview open in
   separate views with Back navigation, preserving the medication form and its
@@ -117,16 +116,23 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
 - **Shared edit artwork** — `data/edit-icon.png` is the supplied pencil-and-square
   image, processed with the built-in image editor. Prompt: remove only the white
   background (including gaps) to transparency; preserve the black silhouette,
-  proportions, and crisp edges. It is bundled with v4.82 and reused at 18–20 px.
+  proportions, and crisp edges. It is bundled with v5 and reused at 18–20 px.
   Autocomplete from an importable drug database; no fixed drug limit. Quantity
   is calculated from dose count, frequency, and duration (including compact
   numeric dose/day inputs), and remains editable when clinical judgment is needed.
-- **Quick prescribing** — press `Ctrl+K` to search patients, treatment templates,
-  starred medicines, and drug classes from one keyboard-friendly command box.
-  Its large result menu closes after six seconds or when the user clicks outside it.
+- **Continuous prescription workflow** — Patient → Medicines → Review → Export
+  uses the same compact progress control on the patient and medication pages.
+  Patient context remains visible during entry, each stage exposes one primary
+  next action, and Review separates structural errors from clinician-review
+  warnings. Unfinished patient/medicine entry is saved as a small encrypted local
+  draft and can be resumed on the next launch.
+- **Progressive medicine rows** — when another medicine is added, completed rows
+  collapse into a numbered one-line summary and reopen from the shared edit icon.
+  Quantity displays whether it was calculated from the regimen or manually
+  overridden; the recalculation action restores automatic mode.
 - **Drug-class browser** — detailed-class medicine rows support Use in Rx,
   mapping, starring, and guarded deletion from the local drug database.
-- **Treatment templates** — compact, tooltip-labelled icon actions create, save,
+- **Treatment templates** — compact icon actions create, save,
   and delete reusable treatment plans.
 - **Patient details and history** — compact demographics, Arabic-aware entry,
   duplicate detection, saved/modified status, and a collapsible prescription
@@ -141,9 +147,6 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   field font sizes from 10–56 px. Dropdown **Default** preserves each control's original
   size. Settings menus always keep their normal size, independent of this preference.
   These controls change the interface, not the prescription's export typography.
-  Top search results request twice the previous width and expand for their content,
-  while staying aligned with the search bar. Top search width is not capped at the
-  screen edge; other autocomplete menus retain their screen-aware width limits.
 - **Outputs**:
   - **Preview / Print** — full prescription PDF (prescriber, patient, drug
     table, QR).
@@ -164,6 +167,14 @@ treatment details, and Add to Rx, Edit, and confirmed Delete actions. Saving
 returns to the browser and highlights the saved template. Leaving a changed
 editor prompts before discarding changes. Existing template storage, medicine
 fields, OR alternatives, recovery, and Settings database import/export remain.
+Saved Templates now uses a responsive two-column card library with bold disease
+titles, medicine-count badges, visible expand controls, distinct empty/search
+states, and sorting by usage, recent activity, modification date, or name. Cards
+start collapsed and reveal medicines only when their disease title or chevron is
+selected; opening one card closes the previous card. Search is debounced, results
+remain batched, and editing or applying a template preserves its query, expanded
+item, and scroll position. Existing templates gain usage metadata automatically
+without changing their medicines.
 
 Online Drug Reference presents five expandable, color-coded label sections:
 Indication (teal), Dose (blue), Contraindications (red), Pregnancy (amber), and
@@ -192,8 +203,17 @@ marked when reused, and can be refreshed or cleared from the page.
 
 The Drug Classes browser places its two columns directly below the search bar,
 without group/class dropdown filters, an unclassified count line, or group stars.
-Detailed-class medicine pages use a borderless **+** to add a medicine to the Rx.
-Unclassified, suggested, and conflicting mapping review remains in Class Mapping Editor.
+Major groups and detailed classes use visible open arrows rather than hidden
+double-click navigation. A major-group page lays its detailed classes out in two
+columns, while a detailed-class page keeps the breadcrumb, medicine count, and
+borderless **+** action together in one compact header (with no second search box).
+Back navigation restores the previous group, detailed class, query, and scroll
+position. Class Mapping Editor uses compact All, Unclassified, Suggested, and
+Conflicting filter chips with an inline result count. Its queue font is independent
+of global autocomplete sizing, and Save & next retains the review position.
+
+Treatment Template appears in Dashboard → Reusable Content directly below
+Favorite Drugs; Drug Classes remains under Clinical Reference.
 
 Dashboard navigation uses matching 24 px blue line icons, a fixed icon/label gap,
 and a pale-blue active-page highlight with a non-shifting indicator. Dashboard
@@ -205,7 +225,7 @@ available on its plain row number. Frequency and notes stay editable and use
 white fields. Settings groups gray cards on a softly graduated white canvas;
 Clinic Identity has three side-by-side contact fields, an inline logo thumbnail
 and a live header preview. Glass is simulated with cached static rendering,
-not desktop transparency. The current version remains 4.82.0.
+not desktop transparency. The current version is 5.
 
 Visual polish keeps input heights compact while enlarging medication labels;
 cached, consistently sized action icons retain their existing commands and the
