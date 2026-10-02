@@ -153,3 +153,28 @@ Start-Process -FilePath 'E:\Prescription App\dist\RxPrescription-v8.0.exe'
 
 The next step is verification, not authorization to change storage, authentication,
 cloud contracts or resume unfinished prescriptions.
+
+## Shared Codex/Claude handoff
+
+The remote handoff infrastructure from `c2ceb04`, `80e9fbb` and `7df4216` was
+integrated without altering `AGENTS.md` or `CLAUDE.md`. Both histories are
+preserved; the add/add conflict in this file was resolved by combining the
+detailed release report with the shared handoff context.
+
+The application is a bilingual English/Arabic Python Windows desktop UI for
+prescription entry/history, PDF/Word export, database search, reusable templates
+and the deployed `rx-v2` Next.js/Redis short-link viewer. Local sensitive data is
+DPAPI-protected. The existing cloud payload contract remains unchanged; new links
+use the configured 60-day retention policy from the 5.7 backend deployment.
+
+No unfinished coding task is assumed. The next task is the acceptance pass above.
+Before future changes, read `README.md`, this file, `AGENTS.md` and `CLAUDE.md`,
+then inspect Git status/history and relevant code. Record the task objective,
+constraints and acceptance criteria; update completed work, changed files,
+verification, unresolved risks and the exact next step before committing/pushing.
+Never weaken DPAPI, patient privacy, cloud secrets/contracts, Arabic/RTL,
+PDF/Word or database/import compatibility without explicit task authorization.
+
+This handoff changed documentation only. Conflict-marker and staged-diff checks
+are required before completing the merge and pushing; no runtime code from the
+8.0 implementation was changed by integrating these remote documents.
