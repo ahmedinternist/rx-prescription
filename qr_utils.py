@@ -10,8 +10,8 @@ Legacy design:
     the QR code, so it works offline with any free QR scanner.
   * The payload is shaped as a URL:  <viewer_base>#<encoded-data>
     so that when a pharmacist scans it with a phone camera + internet, the
-    phone opens the free static viewer page (viewer.html) which decodes the
-    part after '#'. Data never leaves the device / is never sent to a server.
+    phone opens the historical hosted static viewer, which decodes the part
+    after '#'. The retired local sample viewer is no longer shipped.
 
 Encoding pipeline (kept deliberately simple for maximum compatibility):
   Python dict -> json (utf-8) -> base64url (no padding)
@@ -28,6 +28,7 @@ import json
 import zlib
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import qrcode
 from qrcode.constants import ERROR_CORRECT_H
@@ -50,10 +51,32 @@ class Clinic:
     name: str = ""
     address: str = ""
     phone: str = ""
+    website: str = ""
     logo_path: str = ""
     latitude: str = ""
     longitude: str = ""
     include_location: bool = False
+
+
+def normalize_clinic_website(value: str) -> str:
+    """Return a safe HTTPS clinic URL, or an empty string when unset."""
+    website = str(value or "").strip()
+    if not website:
+        return ""
+    if any(char.isspace() for char in website):
+        raise ValueError("Clinic website must not contain spaces")
+    if "://" not in website:
+        website = "https://" + website
+    try:
+        parsed = urlsplit(website)
+        # Accessing ``port`` also rejects malformed values such as :not-a-port.
+        parsed.port
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Clinic website is invalid") from exc
+    if (parsed.scheme.lower() != "https" or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None):
+        raise ValueError("Clinic website must be a valid HTTPS URL")
+    return urlunsplit(("https", parsed.netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 @dataclass
@@ -89,13 +112,15 @@ class Prescription:
 
     def to_payload(self) -> Dict[str, Any]:
         """Serialise to a plain dict (versioned)."""
+        clinic = {key: value for key, value in self.clinic.__dict__.items()
+                  if key != "website"}
         return {
             "v": 2,
             "rx_id": self.rx_id,
             "date": self.date,
             "diagnosis": self.diagnosis,
             "refills": self.refills,
-            "clinic": self.clinic.__dict__,
+            "clinic": clinic,
             "doctor": self.doctor.__dict__,
             "patient": self.patient.__dict__,
             "drugs": [d.__dict__ for d in self.drugs],
@@ -147,10 +172,14 @@ class Prescription:
             "date": self.date.strip(),
             "medications": [],
         }
-        for key, value in (("registrationId", self.doctor.license_no),
+        for key, value in (("clinicName", self.clinic.name),
+                           ("registrationId", self.doctor.license_no),
                            ("phone", self.clinic.phone), ("age", self.patient.age)):
             if value.strip():
                 payload[key] = value.strip()
+        website = normalize_clinic_website(self.clinic.website)
+        if website:
+            payload["website"] = website
         if self.clinic.include_location is True:
             from clinic_location import validate_coordinates
             pin = validate_coordinates(self.clinic.latitude, self.clinic.longitude)

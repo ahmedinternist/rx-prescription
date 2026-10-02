@@ -23,6 +23,10 @@ memory.  The cache is rebuilt automatically whenever the source changes.
 from __future__ import annotations
 
 import csv
+import functools
+import os
+import tempfile
+import threading
 import sqlite3
 import unicodedata
 import xlrd
@@ -277,14 +281,32 @@ class DrugCollection(Sequence[Drug]):
         return rows[0]
 
 
+_database_locks = {}
+_database_locks_guard = threading.Lock()
+
+
+def database_lock(path):
+    with _database_locks_guard:
+        return _database_locks.setdefault(str(Path(path).resolve()).casefold(), threading.RLock())
+
+
+def _mutation(method):
+    @functools.wraps(method)
+    def serialized(self, *args, **kwargs):
+        with database_lock(self.path):
+            return method(self, *args, **kwargs)
+    return serialized
+
+
 class DrugDatabase:
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, *, defer_load: bool = False) -> None:
         self.path = Path(path)
         self.cache_path = self.path.with_suffix(self.path.suffix + ".sqlite3")
         self.drugs: Sequence[Drug] = DrugCollection(self)
         self.columns: List[str] = []
         self.last_import_report: Dict[str, int] = _new_import_stats()
-        self.load()
+        if not defer_load:
+            self.load()
 
     @contextmanager
     def _connect(self):
@@ -309,15 +331,17 @@ class DrugDatabase:
                 value = connection.execute(
                     "SELECT value FROM meta WHERE key='source_signature'"
                 ).fetchone()
-                return bool(value and value[0] == self._source_signature())
+                search_index = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_drugs_search'").fetchone()
+                return bool(value and value[0] == self._source_signature() and search_index)
         except sqlite3.Error:
             return False
 
     def _rebuild_cache(self, drugs: Sequence[Drug]) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
-        if temporary.exists():
-            temporary.unlink()
+        handle, name = tempfile.mkstemp(dir=self.cache_path.parent, prefix=self.cache_path.name + ".", suffix=".tmp")
+        os.close(handle)
+        temporary = Path(name)
         connection = sqlite3.connect(temporary)
         try:
             connection.executescript("""
@@ -344,6 +368,7 @@ class DrugDatabase:
                 CREATE INDEX idx_drugs_generic ON drugs(generic_norm);
                 CREATE INDEX idx_drugs_brand ON drugs(brand_norm);
                 CREATE INDEX idx_drugs_prescribable ON drugs(prescribable_norm);
+                CREATE INDEX idx_drugs_search ON drugs(search_norm);
                 CREATE INDEX idx_drugs_group ON drugs(therapeutic_group);
                 CREATE INDEX idx_drugs_detail ON drugs(detailed_class);
                 CREATE INDEX idx_drugs_mapping_status ON drugs(mapping_status);
@@ -385,6 +410,7 @@ class DrugDatabase:
         return Drug(**{field: row[field] for field in DRUG_FIELDS})
 
     # -- loading ------------------------------------------------------------
+    @_mutation
     def load(self) -> int:
         """Open or rebuild the indexed runtime cache. Returns number loaded."""
         if not self.path.exists():
@@ -392,6 +418,12 @@ class DrugDatabase:
             return 0
         self.columns = list(COLUMN_ALIASES.keys())
         if not self._cache_is_current():
+            if self.cache_path.exists():
+                try:
+                    with self._connect() as connection:
+                        connection.execute("SELECT COUNT(*) FROM drugs").fetchone()
+                except sqlite3.Error:
+                    self.cache_path.unlink(missing_ok=True)
             rows = _read_rows(self.path)
             loaded = [self._dict_to_drug(rec) for rec in rows
                       if (rec.get("generic_name", "").strip()
@@ -429,6 +461,7 @@ class DrugDatabase:
         return [self._row_to_drug(row) for row in rows]
 
     # -- import / replace ---------------------------------------------------
+    @_mutation
     def import_file(self, source_path: str, replace: bool = True) -> int:
         """Import a CSV or Excel (XLS/XLSX) file into the active database.
 
@@ -483,11 +516,13 @@ class DrugDatabase:
         self.load()
         return added
 
+    @_mutation
     def clear(self) -> None:
         """Remove all medicines from the active local database safely."""
         self._write([])
         self.load()
 
+    @_mutation
     def add_confirmed_medicine(self, name: str, therapeutic_group: str,
                                detailed_class: str) -> tuple[Drug, bool]:
         """Add a named medicine, or confirm/map an existing exact name."""
@@ -517,6 +552,7 @@ class DrugDatabase:
              if self.drug_identity(drug) == self.drug_identity(medicine)), medicine)
         return refreshed, created
 
+    @_mutation
     def delete_drug(self, target: Drug) -> bool:
         """Delete exactly one matching product row from the local database."""
         wanted = self.drug_identity(target)
@@ -681,13 +717,21 @@ class DrugDatabase:
         path = path or self.path
         path.parent.mkdir(parents=True, exist_ok=True)
         fields = list(DRUG_FIELDS)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        with open(temporary, "w", encoding="utf-8", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fields)
-            writer.writeheader()
-            for d in drugs:
-                writer.writerow(d.to_dict())
-        temporary.replace(path)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="",
+                    dir=path.parent, prefix=path.name + ".", suffix=".tmp", delete=False) as fh:
+                temporary = Path(fh.name)
+                writer = csv.DictWriter(fh, fieldnames=fields)
+                writer.writeheader()
+                for d in drugs:
+                    writer.writerow(d.to_dict())
+                fh.flush()
+                os.fsync(fh.fileno())
+            temporary.replace(path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     # -- search / autocomplete ---------------------------------------------
     def search(self, query: str, limit: int = 25) -> List[Drug]:
@@ -785,6 +829,7 @@ class DrugDatabase:
         return tuple(_norm(getattr(drug, field, "")) for field in (
             "generic_name", "brand_name", "strength", "form"))
 
+    @_mutation
     def update_classification(self, name: str, therapeutic_group: str,
                               detailed_class: str, append: bool = True) -> bool:
         """Persist a clinician-reviewed class mapping for one local medicine."""
@@ -797,6 +842,7 @@ class DrugDatabase:
         self.load()
         return True
 
+    @_mutation
     def update_classifications(self, names, therapeutic_group: str,
                                detailed_class: str, append: bool = True) -> int:
         """Persist one reviewed classification for several selected medicines."""
@@ -815,6 +861,7 @@ class DrugDatabase:
             self.load()
         return updated
 
+    @_mutation
     def update_drug_classifications(self, selected_drugs, therapeutic_group: str,
                                     detailed_class: str, append: bool = True) -> int:
         """Persist mappings for the exact selected product rows only."""
@@ -832,6 +879,70 @@ class DrugDatabase:
             self._write(drugs)
             self.load()
         return updated
+
+    @_mutation
+    def update_drug_mapping_and_names(self, selected_drugs, therapeutic_group="",
+                                      detailed_class="", *, append=True,
+                                      rename=None):
+        """Commit an editor snapshot with a single CSV write/cache rebuild.
+
+        Existing public update APIs remain available. ``rename`` is optional
+        (scientific, brand) text and applies only to a single selected product.
+        """
+        selected = tuple(selected_drugs)
+        wanted = {self.drug_identity(drug) for drug in selected}
+        if not wanted:
+            return 0, False, []
+        if rename is not None:
+            if len(selected) != 1:
+                raise ValueError("Renaming requires one selected medicine")
+            generic, brand = (str(value or "").strip() for value in rename)
+            if not (generic or brand):
+                raise ValueError("A medicine name is required")
+        drugs = list(self.drugs)
+        prior_states = []
+        mapped, renamed = 0, False
+        for drug in drugs:
+            if self.drug_identity(drug) not in wanted:
+                continue
+            prior_states.append(drug.to_dict())
+            if therapeutic_group:
+                self._set_classification(drug, therapeutic_group, detailed_class, append)
+                mapped += 1
+            if rename is not None:
+                drug.generic_name, drug.brand_name = generic, brand
+                prior_states[-1].update({
+                    "current_generic_name": generic, "current_brand_name": brand,
+                    "current_strength": drug.strength, "current_form": drug.form})
+                renamed = True
+        if mapped or renamed:
+            self._write(drugs)
+            self.load()
+        return mapped, renamed, prior_states
+
+    @_mutation
+    def update_drug_names(self, selected_drug: Drug, generic_name: str,
+                          brand_name: str) -> bool:
+        """Rename one exact product row while preserving all other fields.
+
+        At least one of the scientific or brand names must remain populated.
+        Matching by the full pre-edit identity prevents a similarly named
+        product, strength, or dosage form from being changed accidentally.
+        """
+        generic_name = str(generic_name or "").strip()
+        brand_name = str(brand_name or "").strip()
+        if not generic_name and not brand_name:
+            return False
+        wanted = self.drug_identity(selected_drug)
+        drugs = list(self.drugs)
+        drug = next((item for item in drugs if self.drug_identity(item) == wanted), None)
+        if drug is None:
+            return False
+        drug.generic_name = generic_name
+        drug.brand_name = brand_name
+        self._write(drugs)
+        self.load()
+        return True
 
     def classification_states(self, names) -> list[Dict[str, str]]:
         """Capture classification fields so a mapping change can be recovered."""
@@ -851,13 +962,14 @@ class DrugDatabase:
                  if key in identity_fields | mapping_fields}
                 for drug in self.drugs if self.drug_identity(drug) in wanted]
 
+    @_mutation
     def restore_classification_states(self, states) -> int:
         valid_states = [item for item in states
                         if (isinstance(item, dict)
                             and (item.get("generic_name") or item.get("brand_name")))]
         exact = {
-            tuple(_norm(str(item.get(field, ""))) for field in (
-                "generic_name", "brand_name", "strength", "form")): item
+            tuple(_norm(str(item.get("current_" + field, item.get(field, ""))))
+                  for field in ("generic_name", "brand_name", "strength", "form")): item
             for item in valid_states
             if any(str(item.get(field, "")).strip()
                    for field in ("brand_name", "strength", "form"))
@@ -874,6 +986,8 @@ class DrugDatabase:
             state = exact.get(self.drug_identity(drug)) or legacy.get(_norm(drug.generic_name))
             if not state:
                 continue
+            drug.generic_name = str(state.get("generic_name", drug.generic_name))
+            drug.brand_name = str(state.get("brand_name", drug.brand_name))
             for key in ("therapeutic_group", "detailed_class", "class_mappings", "mapping_status"):
                 setattr(drug, key, str(state.get(key, "")))
             updated += 1

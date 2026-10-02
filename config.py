@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import sys
 import threading
+import tempfile
 import uuid
 import zipfile
 from contextlib import contextmanager
@@ -14,8 +16,14 @@ from pathlib import Path
 from typing import Any, Dict
 
 from security import DataProtectionError, protect, unprotect
+from print_layout import (
+    DEFAULT_PROFILE_NAME,
+    default_profile,
+    normalize_presets,
+    normalize_profiles,
+)
 
-APP_VERSION = "5.1"
+APP_VERSION = "8.0"
 RECOVERY_RETENTION_DAYS = 30
 # ISO portrait sizes in points: A5 is exactly 148 × 210 mm, A4 210 × 297 mm.
 PAPER_SIZES: Dict[str, tuple[float, float]] = {
@@ -47,6 +55,22 @@ def _doctor() -> Dict[str, str]:
     return {"name": "", "license_no": "", "specialty": ""}
 
 
+def _replace_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name + ".",
+                suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def _default_config() -> Dict[str, Any]:
     doctor = _doctor()
     return {
@@ -56,8 +80,9 @@ def _default_config() -> Dict[str, Any]:
         "ui_fonts": {"medication_font_size": 20, "instruction_font_size": 18, "name_font_size": 18},
         "viewer_base_url": DEFAULT_VIEWER_BASE,
         "cloud_rx_api_key": "",
+        "cloud_last_upload_at": "",
         "drug_db_path": str(DEFAULT_DB_PATH),
-        "clinic": {"name": "", "address": "", "phone": "", "logo_path": "",
+        "clinic": {"name": "", "address": "", "phone": "", "website": "", "logo_path": "",
                    "latitude": "", "longitude": "", "include_location": False},
         "doctor": doctor,
         "profiles": {"Default": doctor.copy()},
@@ -68,15 +93,15 @@ def _default_config() -> Dict[str, Any]:
         "recovery_bin": [],
         "favorite_therapeutic_groups": [],
         "dosage_presets": [],
-        "gemini_enabled": False,
-        "gemini_api_key": "",
-        "gemini_last_test": "",
         "openfda_cache": {},
         "prescription_draft": {},
         "document_defaults": {
             "language": "interface", "show_header": True,
             "logo_size": "medium", "margin_mm": 16,
-            "export_folder": "",
+            "font_size": 10, "export_folder": "",
+            "selected_printer": DEFAULT_PROFILE_NAME,
+            "printer_profiles": {DEFAULT_PROFILE_NAME: default_profile()},
+            "calibration_presets": {},
         },
         "auto_backup_enabled": False,
         "last_backup_at": "",
@@ -85,24 +110,82 @@ def _default_config() -> Dict[str, Any]:
     }
 
 
+def _validated_config(data):
+    """Repair malformed sections without discarding unrelated valid values."""
+    defaults = _default_config()
+    clean = dict(data)
+    for key, default in defaults.items():
+        value = clean.get(key, default)
+        if isinstance(default, dict):
+            value = dict(value) if isinstance(value, dict) else dict(default)
+            for field, fallback in default.items():
+                current = value.get(field, fallback)
+                if isinstance(fallback, dict) and not isinstance(current, dict):
+                    current = fallback
+                elif isinstance(fallback, str) and not isinstance(current, str):
+                    current = fallback
+                elif isinstance(fallback, bool) and not isinstance(current, bool):
+                    current = fallback
+                elif isinstance(fallback, int) and (not isinstance(current, int) or isinstance(current, bool)):
+                    current = fallback
+                value[field] = current
+        elif isinstance(default, list):
+            value = value if isinstance(value, list) else []
+            element_type = str if key in {"dosage_presets", "favorite_therapeutic_groups"} else dict
+            value = [item for item in value if isinstance(item, element_type)]
+        elif isinstance(default, str) and not isinstance(value, str):
+            value = default
+        elif isinstance(default, bool) and not isinstance(value, bool):
+            value = default
+        clean[key] = value
+    clean["profiles"] = {name: profile for name, profile in clean["profiles"].items()
+                         if isinstance(name, str) and isinstance(profile, dict)}
+    clean["profiles"].setdefault("Default", clean["doctor"].copy())
+    if clean["language"] not in {"en", "ar"}:
+        clean["language"] = "en"
+    return clean
+
+
 class Config:
     def __init__(self) -> None:
         self.data: Dict[str, Any] = _default_config()
+        self.recovered_unreadable_settings = False
+        self.unreadable_settings_backup = ""
         self._save_lock = threading.RLock()
         self._save_batch_depth = 0
         self._save_pending = False
+        self._last_saved_digest = None
+        self._last_saved_signature = None
         self.load()
 
     def load(self) -> None:
         if CONFIG_PATH.exists():
             try:
                 raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+                if not isinstance(raw, dict):
+                    raise ValueError("Configuration root must be an object")
                 if raw.get("format") == "dpapi-v1":
                     raw = json.loads(unprotect(raw["data"]).decode("utf-8"))
-                self.data.update(raw)
-            except (OSError, ValueError, KeyError, DataProtectionError):
-                pass
+                if not isinstance(raw, dict):
+                    raise ValueError("Decrypted configuration must be an object")
+                self.data.update(_validated_config(raw))
+            except (OSError, ValueError, TypeError, KeyError, DataProtectionError):
+                # DPAPI data is intentionally bound to the Windows user that
+                # created it. A config copied from another PC/account therefore
+                # cannot be decrypted. Preserve the unreadable file for support,
+                # then create a fresh local config instead of repeatedly loading
+                # an unusable envelope on every launch.
+                self.recovered_unreadable_settings = True
+                self.unreadable_settings_backup = self._preserve_unreadable_config()
+                try:
+                    self._write_config()
+                except OSError:
+                    # A read-only profile must not prevent the application from
+                    # opening. Saving a setting later will report the normal I/O
+                    # failure while this session continues with safe defaults.
+                    pass
         self.data.setdefault("clinic", {})
+        self.data["clinic"].setdefault("website", "")
         self.data.setdefault("doctor", _doctor())
         self.data.setdefault("profiles", {"Default": self.data["doctor"].copy()})
         self.data.setdefault("active_profile", "Default")
@@ -112,22 +195,60 @@ class Config:
         self.data.setdefault("recovery_bin", [])
         self.data.setdefault("favorite_therapeutic_groups", [])
         self.data.setdefault("dosage_presets", [])
-        self.data.setdefault("gemini_enabled", False)
-        self.data.setdefault("gemini_api_key", "")
-        self.data.setdefault("gemini_last_test", "")
+        removed_obsolete_reference_settings = False
+        for key in (
+                "gemini_enabled", "gemini_api_key", "gemini_last_test",
+                "clinical_ai_enabled", "openai_api_key", "openai_last_test"):
+            removed_obsolete_reference_settings |= self.data.pop(key, None) is not None
         self.data.setdefault("openfda_cache", {})
         self.data.setdefault("prescription_draft", {})
         self.data.setdefault("document_defaults", {
             "language": "interface", "show_header": True,
             "logo_size": "medium", "margin_mm": 16,
-            "export_folder": "",
+            "font_size": 10, "export_folder": "",
+            "selected_printer": DEFAULT_PROFILE_NAME,
+            "printer_profiles": {DEFAULT_PROFILE_NAME: default_profile()},
+            "calibration_presets": {},
         })
+        self.data["document_defaults"].setdefault("font_size", 10)
+        self.data["document_defaults"].setdefault(
+            "selected_printer", DEFAULT_PROFILE_NAME)
+        self.data["document_defaults"]["printer_profiles"] = normalize_profiles(
+            self.data["document_defaults"].get("printer_profiles"))
+        self.data["document_defaults"]["calibration_presets"] = normalize_presets(
+            self.data["document_defaults"].get("calibration_presets"))
         self.data.setdefault("auto_backup_enabled", False)
         self.data.setdefault("last_backup_at", "")
         self.data.setdefault("last_backup_path", "")
         self.data.setdefault("drug_db_imported_at", "")
         if self.data.get("paper_size") not in PAPER_SIZES:
             self.data["paper_size"] = DEFAULT_PAPER
+        if removed_obsolete_reference_settings:
+            try:
+                self._write_config()
+            except OSError:
+                pass
+        for cache_name in ("clinical-reference-cache.json", "gemini-cache.json"):
+            try:
+                (APP_DIR / cache_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _preserve_unreadable_config() -> str:
+        """Copy an unreadable settings envelope aside before regenerating it."""
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        candidate = CONFIG_PATH.with_name(f"config-unreadable-{stamp}.json")
+        suffix = 1
+        while candidate.exists():
+            candidate = CONFIG_PATH.with_name(
+                f"config-unreadable-{stamp}-{suffix}.json")
+            suffix += 1
+        try:
+            shutil.copy2(CONFIG_PATH, candidate)
+            return str(candidate)
+        except OSError:
+            return ""
 
     def save(self) -> None:
         with self._save_lock:
@@ -139,10 +260,31 @@ class Config:
     def _write_config(self) -> None:
         APP_DIR.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(self.data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        digest = hashlib.sha256(payload).digest()
+        try:
+            stat = CONFIG_PATH.stat()
+            signature = stat.st_ino, stat.st_mtime_ns, stat.st_size
+        except OSError:
+            signature = None
+        if digest == self._last_saved_digest and signature == self._last_saved_signature:
+            return
         protected = {"format": "dpapi-v1", "data": protect(payload)}
-        temporary = CONFIG_PATH.with_suffix(".tmp")
-        temporary.write_text(json.dumps(protected), encoding="utf-8")
-        temporary.replace(CONFIG_PATH)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                    dir=CONFIG_PATH.parent, prefix=CONFIG_PATH.name + ".", suffix=".tmp",
+                    delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(protected, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+                stat = os.fstat(stream.fileno())
+            os.replace(temporary, CONFIG_PATH)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        self._last_saved_digest = digest
+        self._last_saved_signature = stat.st_ino, stat.st_mtime_ns, stat.st_size
 
     @contextmanager
     def batch_save(self):
@@ -431,7 +573,8 @@ class Config:
         existing = existing or {}
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         medications = []
-        for raw in item.get("medications", existing.get("medications", [])):
+        raw_medications = item.get("medications", existing.get("medications", []))
+        for raw in raw_medications if isinstance(raw_medications, list) else []:
             if not isinstance(raw, dict):
                 continue
             medicine = {
@@ -455,6 +598,8 @@ class Config:
         return {
             "id": str(item.get("id", existing.get("id", ""))).strip() or uuid.uuid4().hex,
             "disease": str(item.get("disease", existing.get("disease", ""))).strip(),
+            "category": str(item.get(
+                "category", existing.get("category", ""))).strip(),
             "variant": str(item.get("variant", existing.get("variant", ""))).strip(),
             "medications": medications,
             "created_at": created_at or now,
@@ -628,29 +773,6 @@ class Config:
             self.save()
         return True
 
-    # -- Gemini drug reference ---------------------------------------------
-    @property
-    def gemini_enabled(self) -> bool:
-        return bool(self.data.get("gemini_enabled", False))
-
-    @gemini_enabled.setter
-    def gemini_enabled(self, value: bool) -> None:
-        self.set("gemini_enabled", bool(value))
-
-    @property
-    def gemini_api_key(self) -> str:
-        return str(self.data.get("gemini_api_key", ""))
-
-    def set_gemini(self, api_key: str, enabled: bool) -> None:
-        self.data["gemini_api_key"] = str(api_key or "").strip()
-        self.data["gemini_enabled"] = bool(enabled and self.data["gemini_api_key"])
-        self.save()
-
-    def remove_gemini_key(self) -> None:
-        self.data["gemini_api_key"] = ""
-        self.data["gemini_enabled"] = False
-        self.save()
-
     # -- backup / restore ---------------------------------------------------
     def create_backup(self, destination: str) -> str:
         """Create a portable archive of encrypted settings and the active drug DB."""
@@ -658,12 +780,16 @@ class Config:
         target = Path(destination)
         target.parent.mkdir(parents=True, exist_ok=True)
         database = Path(self.drug_db_path)
+        from patient_history import PatientHistory
+        history_data = PatientHistory().backup_bytes()
         manifest = {"format": BACKUP_FORMAT, "version": 1, "has_drug_database": database.is_file()}
         with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("manifest.json", json.dumps(manifest, separators=(",", ":")))
             archive.writestr("config.json", CONFIG_PATH.read_bytes())
             if database.is_file():
                 archive.write(database, "drug_database.csv")
+            if history_data is not None:
+                archive.writestr("patient_history.json", history_data)
         self.data["last_backup_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self.data["last_backup_path"] = str(target)
         self.save()
@@ -701,27 +827,43 @@ class Config:
                 raise ValueError("The settings backup is not protected correctly.")
             restored = json.loads(unprotect(protected["data"]).decode("utf-8"))
             db_data = archive.read("drug_database.csv") if "drug_database.csv" in names else None
+            history_data = archive.read("patient_history.json") if "patient_history.json" in names else None
 
         if not isinstance(restored, dict):
             raise ValueError("The settings backup is invalid.")
+        from patient_history import HISTORY_PATH, PatientHistory, validate_history_bytes
+        if history_data is not None:
+            validate_history_bytes(history_data)
+        replacements = []
         if db_data is not None:
-            temporary_db = DEFAULT_DB_PATH.with_suffix(".restore.tmp")
-            temporary_db.write_bytes(db_data)
-            temporary_db.replace(DEFAULT_DB_PATH)
+            replacements.append((DEFAULT_DB_PATH, db_data))
             restored["drug_db_path"] = str(DEFAULT_DB_PATH)
-
-        self.data = _default_config()
-        self.data.update(restored)
-        self.data.setdefault("clinic", {})
-        self.data.setdefault("doctor", _doctor())
-        self.data.setdefault("profiles", {"Default": self.data["doctor"].copy()})
-        self.data.setdefault("active_profile", "Default")
-        self.data.setdefault("signing_private_key", "")
-        self.data.setdefault("medication_favorites", [])
-        self.data.setdefault("treatment_templates", [])
-        self.data.setdefault("favorite_therapeutic_groups", [])
-        self.data.setdefault("dosage_presets", [])
-        self.save()
+        if history_data is not None:
+            replacements.append((HISTORY_PATH, history_data))
+        new_data = _default_config()
+        new_data.update(_validated_config(restored))
+        if not isinstance(new_data.get("clinic"), dict) or not isinstance(new_data.get("doctor"), dict):
+            raise ValueError("The settings backup is invalid.")
+        replacements.append((CONFIG_PATH, json.dumps({"format": "dpapi-v1", "data": protect(
+            json.dumps(new_data, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))}).encode("utf-8")))
+        from drug_db import database_lock
+        with self._save_lock, database_lock(DEFAULT_DB_PATH), PatientHistory()._lock:
+            originals = {path: path.read_bytes() if path.exists() else None for path, _ in replacements}
+            changed = []
+            try:
+                for path, contents in replacements:
+                    _replace_bytes(path, contents)
+                    changed.append(path)
+            except Exception:
+                for path in reversed(changed):
+                    if originals[path] is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        _replace_bytes(path, originals[path])
+                raise
+            self.data = new_data
+            self._last_saved_digest = None
+            self._last_saved_signature = None
 
 
 config = Config()

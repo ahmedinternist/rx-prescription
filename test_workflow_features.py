@@ -83,7 +83,7 @@ def test_workflow_validation_separates_blocking_errors_from_warnings():
         "medicines.1.dosage", "medicines.1.frequency", "medicines.1.duration"}
     missing = validate_prescription_workflow({}, [])
     assert {issue.field for issue in missing if issue.severity == "error"} == {
-        "patient.name", "medicines"}
+        "medicines"}
 
 
 def test_draft_round_trip_keeps_minimal_unicode_snapshot():
@@ -99,4 +99,4 @@ def test_draft_round_trip_keeps_minimal_unicode_snapshot():
     assert draft["active_page"] == "medications"
     assert workflow_step(draft["patient"], draft["medicines"]) == 2
     assert workflow_step(draft["patient"], draft["medicines"], "review") == 3
-    assert workflow_step(draft["patient"], draft["medicines"], "export") == 4
+    assert workflow_step(draft["patient"], draft["medicines"], "export") == 3

@@ -7,6 +7,5 @@ arabic-reshaper>=3.0
 python-bidi>=0.6
 openpyxl>=3.1
 cryptography>=44.0
-google-genai>=2.22,<3
 xlrd>=2.0
 xlwt>=1.3

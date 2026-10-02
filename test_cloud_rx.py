@@ -31,6 +31,61 @@ def test_cloud_post_utf8_headers_and_exact_returned_link():
     assert result == cloud.CloudRxLink("test", url) and len(calls) == 1
 
 
+def test_cloud_readiness_checks_api_and_viewer_without_creating_record():
+    calls = []
+    def opener(request, timeout):
+        calls.append((request.full_url, request.method, request.data))
+        assert timeout == 15
+        if request.full_url == cloud.API_URL:
+            assert request.method == "GET" and request.data is None
+            assert request.get_header("X-api-key") == "test-key"
+            return Response(json.dumps({
+                "status": "ok", "redis": "ok", "retentionDays": 60}).encode())
+        assert request.full_url == cloud.VIEWER_URL
+        assert request.method == "GET" and request.get_header("X-api-key") is None
+        return Response(b"<html>")
+    result = cloud.check_readiness(" test-key ", opener=opener)
+    assert result == cloud.CloudReadiness(retention_days=60)
+    assert calls == [(cloud.API_URL, "GET", None), (cloud.VIEWER_URL, "GET", None)]
+
+
+@pytest.mark.parametrize("result", [
+    {}, {"status": "ok", "redis": "failed", "retentionDays": 60},
+    {"status": "ok", "redis": "ok", "retentionDays": 7},
+])
+def test_cloud_readiness_rejects_invalid_health_response(result):
+    with pytest.raises(cloud.CloudRxError) as caught:
+        cloud.check_readiness("test", opener=lambda *a, **k: Response(json.dumps(result).encode()))
+    assert caught.value.code == "response"
+
+
+def test_cloud_readiness_reports_viewer_failure_separately():
+    calls = 0
+    def opener(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return Response(json.dumps({
+                "status": "ok", "redis": "ok", "retentionDays": 60}).encode())
+        raise HTTPError(cloud.VIEWER_URL, 503, "viewer unavailable", {}, io.BytesIO())
+    with pytest.raises(cloud.CloudRxError) as caught:
+        cloud.check_readiness("test", opener=opener)
+    assert caught.value.code == "viewer"
+
+
+@pytest.mark.parametrize("error,code", [
+    (HTTPError(cloud.API_URL, 401, "rejected", {}, io.BytesIO()), "auth"),
+    (HTTPError(cloud.API_URL, 503, "redis unavailable", {}, io.BytesIO()), "server"),
+    (TimeoutError(), "timeout"),
+    (URLError("offline"), "offline"),
+])
+def test_cloud_readiness_safe_connection_errors(error, code):
+    with pytest.raises(cloud.CloudRxError) as caught:
+        cloud.check_readiness("private-key", opener=lambda *a, **k: (_ for _ in ()).throw(error))
+    assert caught.value.code == code
+    assert "private-key" not in str(caught.value)
+
+
 @pytest.mark.parametrize("status,code", [(401, "auth"), (403, "auth"), (429, "quota"),
                                         (500, "server"), (503, "server"), (400, "http"), (302, "redirect")])
 def test_cloud_http_errors_do_not_disclose_server_body(status, code):
@@ -78,6 +133,9 @@ def test_cloud_missing_key_and_redirects_are_not_sent():
     with pytest.raises(cloud.CloudRxError) as caught:
         cloud.upload_prescription({}, "", opener=lambda *a, **k: pytest.fail("must not send"))
     assert caught.value.code == "missing_key"
+    with pytest.raises(cloud.CloudRxError) as caught:
+        cloud.check_readiness("", opener=lambda *a, **k: pytest.fail("must not send"))
+    assert caught.value.code == "missing_key"
     assert cloud._NoRedirect().redirect_request(None, None, 302, "", {}, "https://evil.example") is None
 
 
@@ -96,10 +154,13 @@ assert payload["drugs"] == [{"brand_name":"Brand only","notes":"مع الطعا�
 assert "clinic" not in payload and "sig" not in payload
 config.data["signing_private_key"] = "old-key-preserved"
 config.cloud_rx_api_key = "fictitious-encrypted-test-key"
+config.set("cloud_last_upload_at", "2026-09-26T12:34:56+00:00")
 raw = CONFIG_PATH.read_text()
-assert "fictitious-encrypted-test-key" not in raw and '"dpapi-v1"' in raw
+assert "fictitious-encrypted-test-key" not in raw and "2026-09-26T12:34:56" not in raw
+assert '"dpapi-v1"' in raw
 reloaded = Config()
 assert reloaded.cloud_rx_api_key == "fictitious-encrypted-test-key"
+assert reloaded.get("cloud_last_upload_at") == "2026-09-26T12:34:56+00:00"
 assert reloaded.data["signing_private_key"] == "old-key-preserved"
 ''')
 
@@ -128,7 +189,8 @@ assert len(calls)==3
 def test_mobile_viewer_payload_exact_fields_and_privacy(tmp_path):
     run_isolated(tmp_path, '''
 from qr_utils import Prescription, Doctor, Patient, Clinic, DrugItem
-rx = Prescription(clinic=Clinic(name="Do not upload",address="Do not upload",phone=" 07700000000 ",logo_path="private-path"),
+rx = Prescription(clinic=Clinic(name="Public Clinic",address="Do not upload",phone=" 07700000000 ",
+                                website=" clinic.example/path?q=1 ",logo_path="private-path"),
     doctor=Doctor(name=" د. أحمد ",license_no=" TEST ",specialty=" باطنية "),
     patient=Patient(name=" أحمد علي ",age=" 50 ",sex="F",id_number="private-id",allergies="private"),
     drugs=[DrugItem(brand_name=" Brand ",generic_name=" Molecule ",dosage=" 5 mg ",
@@ -136,11 +198,12 @@ rx = Prescription(clinic=Clinic(name="Do not upload",address="Do not upload",pho
            DrugItem(brand_name="Brand only"),DrugItem(generic_name="Scientific only")],
     date="2026-09-18",rx_id="private-local-id",diagnosis="private",refills="1")
 payload = rx.to_cloud_payload()
-assert payload == {"doctor":"د. أحمد · باطنية","registrationId":"TEST","phone":"07700000000",
+assert payload == {"doctor":"د. أحمد · باطنية","clinicName":"Public Clinic","registrationId":"TEST","phone":"07700000000",
+    "website":"https://clinic.example/path?q=1",
     "patient":"أحمد علي","age":"50","date":"2026-09-18","medications":[
     {"tradeName":"Brand","genericName":"Molecule","dosage":"5 mg","instructions":"1x1 · مع الطعام",
      "duration":"7 days","quantity":"7"},{"tradeName":"Brand only"},{"genericName":"Scientific only"}]}
-rx.doctor.license_no = rx.clinic.phone = rx.patient.age = " "
+rx.doctor.license_no = rx.clinic.name = rx.clinic.phone = rx.clinic.website = rx.patient.age = " "
 rx.drugs = [DrugItem(brand_name="Brand",notes="عند النوم"),DrugItem(generic_name="Molecule",frequency="1x2")]
 payload = rx.to_cloud_payload()
 assert set(payload) == {"doctor","patient","date","medications"}
@@ -151,14 +214,37 @@ assert rx.to_cloud_payload()["age"] == "0"
 ''')
 
 
+def test_clinic_website_validation_and_legacy_qr_privacy(tmp_path):
+    run_isolated(tmp_path, '''
+from config import Config, CONFIG_PATH, config
+from qr_utils import Clinic, Prescription, normalize_clinic_website
+assert normalize_clinic_website("") == ""
+assert normalize_clinic_website("clinic.example") == "https://clinic.example"
+assert normalize_clinic_website(" https://Clinic.Example/path?q=1#top ") == "https://Clinic.Example/path?q=1#top"
+for invalid in ("http://clinic.example", "javascript://alert", "https://user:pass@clinic.example",
+                "https://", "https://clinic.example:bad", "https://clinic example"):
+    try: normalize_clinic_website(invalid)
+    except ValueError: pass
+    else: raise AssertionError(invalid)
+rx = Prescription(clinic=Clinic(website="clinic.example"))
+assert rx.to_cloud_payload()["website"] == "https://clinic.example"
+assert "website" not in str(rx.to_qr_payload())
+assert "website" not in rx.to_payload()["clinic"]
+config.set_clinic(website="https://clinic.example")
+assert "clinic.example" not in CONFIG_PATH.read_text(encoding="utf-8")
+assert Config().get_clinic()["website"] == "https://clinic.example"
+''')
+
+
 def test_cloud_export_snapshot_exact_qr_and_busy_guard(tmp_path):
     run_isolated(tmp_path, '''
 from types import SimpleNamespace
 import main, i18n as I
 from main import App
 from config import config
-from qr_utils import Prescription, Doctor, Patient, DrugItem
-rx=Prescription(doctor=Doctor(name="Original",license_no="1"),patient=Patient(name="Original patient"),
+from qr_utils import Prescription, Doctor, Patient, Clinic, DrugItem
+rx=Prescription(clinic=Clinic(name="Original clinic",website="https://original.example"),
+    doctor=Doctor(name="Original",license_no="1"),patient=Patient(name="Original patient"),
     drugs=[DrugItem(brand_name="Original brand")],date="2026-09-18")
 config.cloud_rx_api_key="test-key"
 config.data["document_defaults"]={"language":"interface","margin_mm":16}
@@ -173,9 +259,13 @@ assert ui._export_busy and len(calls)==1
 assert App._start_cloud_export(ui,"Export") is None
 rx.patient.name="Different patient"
 rx.drugs[0].brand_name="Different brand"
+rx.clinic.website="https://different.example"
+rx.clinic.name="Different clinic"
 config.data["document_defaults"]["margin_mm"]=24
 I.set_lang("ar")
 assert op["payload"]["patient"]=="Original patient"
+assert op["payload"]["website"]=="https://original.example"
+assert op["payload"]["clinicName"]=="Original clinic"
 assert op["payload"]["medications"]==[{"tradeName":"Original brand"}]
 assert op["rx"].drugs[0].brand_name=="Original brand"
 assert op["document"]["margin_mm"]==16 and op["document"]["language"]=="en"
@@ -255,8 +345,12 @@ for paper,points in (("A5",(419.528,595.276)),("A4",(595.276,841.889))):
             doc=Document(path)
             assert abs(doc.sections[0].page_width.pt-points[0])<.1
             assert abs(doc.sections[0].page_height.pt-points[1])<.1
-            assert len(doc.inline_shapes)==int(include)
-            assert any(I.t("pdf_scan") in p.text for p in doc.paragraphs)==include
+            floating=len(doc._element.xpath(".//wp:anchor"))
+            is_floating=include and (kind=="header" or (paper=="A5" and kind=="compact"))
+            assert len(doc.inline_shapes)==int(include and not is_floating)
+            assert floating==int(is_floating)
+            assert any(I.t("pdf_scan") in p.text for p in doc.paragraphs)==bool(
+                include and kind=="compact" and paper!="A5")
             if not include and kind=="compact":
                 assert doc.paragraphs[-1].text.startswith("1.")
         path=root/f"{paper}-{include}.pdf"
@@ -284,7 +378,9 @@ app.collect=lambda:Prescription(doctor=Doctor(name="Fictitious",license_no="TEST
 app._generate_full_document=lambda *args:None
 gate=threading.Event()
 ticks=[]
+upload_calls=[]
 def upload(*args):
+    upload_calls.append(args)
     assert gate.wait(3)
     return cloud_rx.CloudRxLink("test","https://rx-v2.vercel.app/p/fictitious")
 main.cloud_rx.upload_prescription=upload
@@ -298,11 +394,50 @@ while app._export_busy and time.monotonic()<deadline:
     app.update()
     time.sleep(.005)
 assert not app._export_busy and ticks and not errors
+assert len(upload_calls)==1 and config.get("cloud_last_upload_at", "")
 assert all(w.cget("state")=="normal" for w in app.action.winfo_children() if isinstance(w,VisualButton))
 settings=SettingsWindow(app)
 app.update()
 assert settings.cloud_key_entry.cget("show")=="•"
 assert not hasattr(settings,"viewer_var")
+assert settings.cloud_readiness_labels["upload"].cget("text") != I.t("cloud_status_never")
+settings.clinic_name_var.set("Unsaved Preview Clinic")
+settings.clinic_phone_var.set("+9647700000000")
+settings.clinic_website_var.set("clinic.example")
+settings.latitude_var.set("33.3152")
+settings.longitude_var.set("44.3661")
+settings.include_location_var.set(True)
+settings._open_cloud_viewer_preview()
+app.update()
+preview=next(w for w in settings.winfo_children() if isinstance(w,main.ctk.CTkToplevel))
+pending=[preview]
+texts=[]
+while pending:
+    w=pending.pop()
+    try:
+        text=w.cget("text")
+        if text:texts.append(text)
+    except Exception:pass
+    pending.extend(w.winfo_children())
+assert "Unsaved Preview Clinic" in texts and I.t("cloud_preview_medication") in texts
+assert len(upload_calls)==1
+preview.destroy()
+
+readiness_gate=threading.Event()
+def readiness(_key):
+    assert readiness_gate.wait(3)
+    return cloud_rx.CloudReadiness(60)
+main.cloud_rx.check_readiness=readiness
+settings._test_cloud_readiness()
+assert settings.cloud_test_button.cget("state")=="disabled"
+app.after(40,readiness_gate.set)
+deadline=time.monotonic()+4
+while settings._cloud_test_running and time.monotonic()<deadline:
+    app.update()
+    time.sleep(.005)
+assert settings.cloud_readiness_labels["api"].cget("text")==I.t("cloud_status_ready")
+assert settings.cloud_readiness_labels["viewer"].cget("text")==I.t("cloud_status_reachable")
+assert len(upload_calls)==1
 settings.destroy()
 app._set_export_busy(True)
 app._cloud_export_failed(op,cloud_rx.CloudRxError("offline"))

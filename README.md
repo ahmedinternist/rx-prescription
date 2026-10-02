@@ -11,32 +11,12 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Optional Gemini drug reference
-
-The amber **!** beside a populated scientific-name field opens a concise
-Gemini Flash reference card for that medicine. The app uses Google's
-rolling `gemini-flash-latest` model alias with stable-version fallbacks. It returns
-nine validated sections: indications, minimum and usual starting dose, minimum
-and usual frequency, maximum dose/frequency, adverse effects, contraindications, pregnancy,
-and renal adjustment. Grounded results include returned source links.
-
-1. Create a Gemini API key in Google AI Studio.
-2. Open **Settings → Gemini drug reference…**.
-3. Paste the key, enable the feature, and use **Test connection**.
-
-The API key and the seven-day lookup cache are encrypted for the current
-Windows user. Only the scientific medicine name is included in lookup requests;
-patient and prescription data are not sent. Results are reference material for
-clinician verification and never fill prescription fields automatically.
-The app first requests live Google Search grounding. If Google returns a quota
-error, it automatically retries without web search and marks the result clearly
-as **Free mode — not web-grounded**; no source links are claimed in that mode.
-
 ## Build the Windows executable
 ```powershell
 powershell -ExecutionPolicy Bypass -File build_exe.ps1
 ```
-The output is `dist/RxPrescription-v5.exe`. Building requires a full Windows
+The output name follows `APP_VERSION` (for example,
+`dist/RxPrescription-v8.0.exe`). Building requires a full Windows
 Python installation with Tcl/Tk; the script stops early if Tk cannot open.
 
 ## Safety, privacy, and QR verification
@@ -44,12 +24,14 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   QR exports upload prescriber name/specialty and license, clinic phone, patient
   name and age when entered, date and medication details—not patient sex, IDs,
   allergies, clinic logo paths or signing keys. Anyone holding the link can view
-  these fields. No clinic coordinates are currently collected or uploaded.
+  these fields. Clinic coordinates and website are uploaded only when explicitly
+  configured in Clinic Identity.
 - Prescription fields are validated before export. Duplicate-medication warnings
   require an explicit confirmation.
 - Cloud links are not locally ES256-signed or claimed as signature-verified.
   Anyone holding a printed QR/short link may view the uploaded prescription.
-  Retention and link expiry are controlled by the deployed backend.
+  New links are retained by the deployed backend for 60 days; links created
+  before the version 5.7 deployment keep their original expiry.
 - This project is a document-generation tool, not clinical decision support.
   Drug interactions, contraindications, and local prescribing rules must be
   supplied by an approved clinical data source and governance process.
@@ -95,10 +77,11 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   (this page/all settings) and Save Changes; closing with X/Escape uses the same
   unsaved-change confirmation as the removed redundant Cancel button. The
   native Windows minimize/maximize/close title-bar controls remain unchanged.
-- **Word with Header** retains the clinic logo/name/contact details, followed
-  by one prescriber/specialty/license paragraph and one date/prescription-number
-  paragraph. It omits the prescription title/subtitle and closing signature
-  block. Patient details, numbered medicine lines and QR content remain.
+- **Word with Header** uses a compact letterhead layout based on the supplied
+  clinic document: centred clinic/prescriber identity, compact left-aligned
+  license/patient/date details, numbered medicine lines, a movable borderless
+  logo at the upper-left and a movable borderless QR at the lower-left. It omits
+  the prescription title/subtitle, QR caption and closing signature block.
   The separate Export to Word without Header output is unchanged.
 - **Compact workspace** — 10 px card padding, tighter card gaps, 36 px input
   fields, and compact action toolbars. The dashboard chevron switches to a
@@ -124,12 +107,17 @@ Python installation with Tcl/Tk; the script stops early if Tk cannot open.
   uses the same compact progress control on the patient and medication pages.
   Patient context remains visible during entry, each stage exposes one primary
   next action, and Review separates structural errors from clinician-review
-  warnings. Unfinished patient/medicine entry is saved as a small encrypted local
-  draft and can be resumed on the next launch.
+  warnings. Unfinished prescriptions are not saved or restored on the next launch.
+  Older resume snapshots are discarded on startup; saved patient history is unaffected.
+- **Compact references and stable browsing** — OpenFDA sections start collapsed;
+  opening a section closes the previous section. Adding favorites or treatment
+  templates keeps the current browser page and scroll position. Favorite selections
+  and the expanded saved-template card remain selected.
 - **Progressive medicine rows** — when another medicine is added, completed rows
   collapse into a numbered one-line summary and reopen from the shared edit icon.
-  Quantity displays whether it was calculated from the regimen or manually
-  overridden; the recalculation action restores automatic mode.
+  Medication frequency offers editable Arabic presets. Notes occupy the former
+  Quantity field space without changing the other field columns. Existing saved
+  quantity data remains compatible but no Quantity control is displayed.
 - **Drug-class browser** — detailed-class medicine rows support Use in Rx,
   mapping, starring, and guarded deletion from the local drug database.
 - **Treatment templates** — compact icon actions create, save,
@@ -225,7 +213,77 @@ available on its plain row number. Frequency and notes stay editable and use
 white fields. Settings groups gray cards on a softly graduated white canvas;
 Clinic Identity has three side-by-side contact fields, an inline logo thumbnail
 and a live header preview. Glass is simulated with cached static rendering,
-not desktop transparency. The current version is 5.
+not desktop transparency. The current version is 8.0.
+
+Version 8.0 preserves the current patient/medicine form in memory across language
+changes, repairs malformed settings sections, waits for exports before closing,
+ignores stale OpenFDA lookup results, and bounds heavy browsing card contents.
+Off-screen geometry spacers retain scrolling; unfinished prescriptions still
+are not saved or reopened after application restart.
+
+Version 7.9 blocks writes to unreadable patient history, keeps same-name patients
+separate unless an existing patient ID is explicitly selected, includes encrypted
+patient history in manual/automatic backups, recovers invalid derived medicine
+caches on startup, and serializes medicine database mutations. Older backups
+without patient history leave existing history untouched. DPAPI backups remain
+bound to the original Windows account; this is not cross-PC key migration.
+
+Version 7.8 keeps Favorite Drugs cards compact: only medicine names and the
+category are displayed, with the category at the end of the action row.
+Dosage, frequency, duration and notes remain available in the editor and are
+preserved when adding a favorite to the prescription.
+
+Version 7.7 wraps long medicine names within their card columns and reserves
+space for action icons. Compact bilingual save feedback distinguishes saving,
+successful persistence and failures without changing saved medication values.
+
+Version 7.6 shows values-only regimen summaries on treatment cards while retaining
+editor field labels. Medication Entry permits only one expanded editing row at
+a time, including incomplete rows. Mapping shows trade names alongside scientific
+names with larger text; the selected-medicine heading follows the same order.
+
+Version 7.5 unifies card corners and spacing, uses bold primary names with
+regular scientific names and subdued regimen details, and standardizes Add,
+Edit, Delete and Star icon hit areas without visible boxes or tooltips. Focus
+feedback changes only the field border color and preserves warning/error colors.
+
+Version 7.4 pauses favorite/template card construction beyond the viewport plus
+a small buffer, resuming automatically as the user scrolls. Glass redraws wait
+200 ms after window resizing settles. Replacement templates reuse existing
+medication rows, invalidate old autocomplete callbacks and clear unused rows.
+
+Version 7.3 keeps glass image processing off the Tk thread, clips tall panels to
+their visible slice and bounds the image cache. Same-page navigation avoids
+remapping, and favorites/templates reuse unchanged cards with incremental initial
+rendering. Hidden card construction pauses until its page is shown. Autocomplete
+uses a 35 ms debounce without changing matching or result order. Template
+application yields between rows and retains its modal selection dialog until done.
+
+Prescription saves use a captured snapshot and a dedicated serialized worker;
+repeat clicks are ignored while saving, and newer edits are never marked saved.
+Closing through the UI waits for the pending save. Patient history caches decrypted
+records with file-change invalidation; returned records cannot mutate that cache.
+Settings and history retain the existing DPAPI JSON formats and use flushed atomic
+replacement. Unchanged settings writes are skipped only while the backing file
+also remains unchanged. No unfinished prescription is restored.
+
+Drug-cache loading is deferred until after window construction, and ReportLab/font
+initialization is lazy. The disposable SQLite cache adds a combined-name index,
+without changing normalization, prefix-first ordering or substring behavior.
+openFDA worker callbacks use the UI queue. See `PERF_REPORT.md` for measured
+improvements, remaining budget misses and verification limits.
+
+Version 7.2 builds reference, interaction, favorite, classification and template
+pages on first use and reuses their controls. Startup backup compression and
+classification indexing run in background workers. Superseded medication
+autocomplete jobs are cancelled when still queued. Bounded local timing samples
+contain only fixed operation names and durations, never prescription content.
+
+Version 7.1 renders only the mapping-list viewport, saves captured mapping/name
+changes in one background CSV write/cache rebuild, and defers patient comparisons
+while their page is hidden. Unchanged comparison results reuse their widgets.
+While a mapping save is pending, repeat saves and editor-context changes are
+blocked; failed saves retain the pending edits for retry.
 
 Visual polish keeps input heights compact while enlarging medication labels;
 cached, consistently sized action icons retain their existing commands and the
@@ -252,6 +310,13 @@ No tooltips, clinical record changes or document-format changes are introduced.
   as CSV, XLSX, or legacy XLS.
 
 ## QR payload & viewer
+- **Settings → Clinic Identity → Clinic website URL** accepts a public HTTPS
+  clinic website (a bare domain is normalized to HTTPS). When present, it is
+  added to new cloud export snapshots and appears as a globe action in the
+  scanned viewer. It is not embedded in the QR image or saved prescription.
+- **Preview cloud viewer** opens a local mobile-sized preview with fictitious
+  prescription data and the current unsaved clinic identity. It creates no
+  network request, file or Redis record.
 - **Settings → Clinic Identity → Clinic Location** accepts a Google Maps dropped-pin
   link, a supported Google short link, or explicit latitude/longitude. Check and
   confirm the pin before saving. Map-centre (`@…`) coordinates are deliberately
@@ -269,8 +334,13 @@ No tooltips, clinical record changes or document-format changes are introduced.
   the QR short-link format remain unchanged. Small Clinic Identity views can scroll.
 - Open **Settings → QR verification**, enter the cloud API key and save Settings.
   The key is masked and stored in Windows-encrypted configuration, not in the executable.
+- QR verification also shows whether the key is configured, whether the cloud
+  API/Redis and public viewer are reachable, and the encrypted timestamp of the
+  last successful prescription upload. Its connection test performs an authenticated
+  read-only health check and does not create a prescription.
 - Export snapshots the explicit mobile-viewer JSON contract and POSTs it to
-  `/api/rx` on a worker: `doctor`, `registrationId`, `phone`, `patient`, `age`,
+  `/api/rx` on a worker: optional `clinicName`, `doctor`, `registrationId`, `phone`,
+  optional `website`, `patient`, `age`,
   `date`, and `medications`. Each medicine uses `tradeName`, `genericName`
   (scientific name), `dosage`, `instructions` (frequency and notes), `duration`,
   and `quantity`. Unentered optional fields are omitted; no dosing is inferred.
@@ -284,12 +354,12 @@ No tooltips, clinical record changes or document-format changes are introduced.
   Export without QR requires an explicit choice and omits QR/caption/QR-only spacing.
   There is no inline-data fallback. A timeout may occur after storage succeeded;
   an explicit retry can create another cloud record.
-- `viewer.html` and old encoding/signing helpers are deprecated historical assets,
-  excluded from new executable resources and unused by active exports. Old printed
-  QR codes still depend on their original hosted viewer and are not migrated.
+- Legacy encoding/signing helpers remain available as compatibility APIs but are
+  unused by active exports. Retired local sample-viewer files are no longer shipped.
+  Old printed QR codes still depend on their original hosted viewer and are not migrated.
 - The new mobile-schema fictitious upload, actual QR-image decoding and rendered
   prescription were checked successfully. The historical v4 compatibility patch
-  in `backend-compat/` must not overwrite the current mobile layout. See
+  remains recoverable from Git history and must not overwrite the current mobile layout. See
   `Cloud_QR_Verification.md` for the latest viewer deployment status and QA limits.
 
 ## Files
@@ -301,7 +371,6 @@ No tooltips, clinical record changes or document-format changes are introduced.
 - `clinic_location.py` – clinic pin validation and permission-based loopback browser helper
 - `pdf_generator.py`  – A5/A4 full PDF + compact label PDF + Word export (Arabic-aware)
 - `main.py`           – CustomTkinter desktop GUI
-- `viewer.html`       – deprecated historical decoder, not bundled
 - `data/drugs.csv`    – seed drug database
 
 ## Independent display fonts

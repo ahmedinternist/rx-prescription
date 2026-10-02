@@ -83,11 +83,9 @@ def validate_prescription_workflow(patient: Any, medicines: list[Any]) -> list[W
     Blocking errors are structural only.  Missing regimen details remain warnings;
     the clinician can still continue after reviewing them.
     """
-    get_patient = (patient.get if isinstance(patient, dict)
-                   else lambda key, default="": getattr(patient, key, default))
     issues: list[WorkflowIssue] = []
-    if not str(get_patient("name", "") or "").strip():
-        issues.append(WorkflowIssue("error", "patient.name", "Patient name is required."))
+    # Patient identity is optional for medicine-only review and export. Patient
+    # saving remains a separate workflow and validates its required fields.
     present = [item for item in medicines if medicine_present(item)]
     if not present:
         issues.append(WorkflowIssue("error", "medicines", "Add at least one medicine."))
@@ -104,10 +102,12 @@ def validate_prescription_workflow(patient: Any, medicines: list[Any]) -> list[W
 
 
 def workflow_step(patient: Any, medicines: list[Any], view: str = "entry") -> int:
-    """Return the visible 1-based Patient/Medicines/Review/Export step."""
-    if view == "export":
-        return 4
-    if view == "review":
+    """Return the visible 1-based Patient/Medicines/Export step.
+
+    ``review`` remains accepted for callers from older integrations, but it now
+    resolves to the Export step because review is no longer a separate stage.
+    """
+    if view in {"review", "export"}:
         return 3
     get = patient.get if isinstance(patient, dict) else lambda key, default="": getattr(patient, key, default)
     return 2 if str(get("name", "") or "").strip() else 1

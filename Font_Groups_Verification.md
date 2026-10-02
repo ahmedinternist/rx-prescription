@@ -21,8 +21,8 @@ the app; saving Settings persists the three new preference keys.
 
 ## Verification
 
-- Isolated regression suite: **155 passed**; unsafe legacy `test_headless.py`
-  remains excluded. No production patient records are used in tests.
+- Isolated regression suite: **155 passed**; the retired destructive smoke script
+  remained excluded. No production patient records are used in tests.
 - Tests verify range validation, independent migration, encrypted persistence,
   selected instruction text and popup size consistency, updated/new rows,
   preserved Arabic/mixed name input, unchanged neutral menus and fixed Settings

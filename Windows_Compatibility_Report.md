@@ -40,7 +40,7 @@ Windows compatibility still requires actual machines/VMs; it is not certified.
 These UI checks instantiate the source application with hidden windows.
 They test callback/workflow behavior, not pixel-perfect visibility at every DPI,
 screen size, or Windows theme. The packaged executable was inspected, not
-launched as a frozen GUI during this audit. Live Gemini/OpenFDA requests, printer
+launched as a frozen GUI during this audit. Live OpenFDA requests, printer
 drivers, Word installation, Defender/SmartScreen and installer behavior were
 not certified by these checks.
 

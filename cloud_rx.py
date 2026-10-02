@@ -27,6 +27,11 @@ class CloudRxLink:
     url: str
 
 
+@dataclass(frozen=True)
+class CloudReadiness:
+    retention_days: int
+
+
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -67,6 +72,56 @@ def upload_prescription(payload: dict, api_key: str, *, opener=None) -> CloudRxL
     except HTTPError as exc:
         code = ("auth" if exc.code in (401, 403) else "quota" if exc.code == 429
                 else "server" if exc.code >= 500 else "redirect" if 300 <= exc.code < 400 else "http")
+        raise CloudRxError(code, exc.code) from None
+    except (TimeoutError, socket.timeout):
+        raise CloudRxError("timeout") from None
+    except URLError as exc:
+        raise CloudRxError("timeout" if isinstance(exc.reason, TimeoutError) else "offline") from None
+    except OSError:
+        raise CloudRxError("offline") from None
+    except (ValueError, UnicodeDecodeError):
+        raise CloudRxError("response") from None
+
+
+def check_readiness(api_key: str, *, opener=None) -> CloudReadiness:
+    """Verify the API key, Redis connection and public viewer without writing a record."""
+    key = str(api_key or "").strip()
+    if not key:
+        raise CloudRxError("missing_key")
+    if "\r" in key or "\n" in key:
+        raise CloudRxError("auth")
+    send = opener or build_opener(_NoRedirect()).open
+    checking_viewer = False
+    request = Request(API_URL, method="GET", headers={
+        "Accept": "application/json", "x-api-key": key})
+    try:
+        with send(request, timeout=TIMEOUT) as response:
+            if not 200 <= response.status < 300:
+                raise CloudRxError("http", response.status)
+            raw = response.read(65537)
+        if len(raw) > 65536:
+            raise CloudRxError("response")
+        result = json.loads(raw.decode("utf-8"))
+        if (not isinstance(result, dict) or result.get("status") != "ok"
+                or result.get("redis") != "ok"
+                or isinstance(result.get("retentionDays"), bool)
+                or result.get("retentionDays") != 60):
+            raise CloudRxError("response")
+
+        checking_viewer = True
+        viewer_request = Request(VIEWER_URL, method="GET", headers={"Accept": "text/html"})
+        with send(viewer_request, timeout=TIMEOUT) as response:
+            if not 200 <= response.status < 300:
+                raise CloudRxError("viewer", response.status)
+            response.read(1)
+        return CloudReadiness(retention_days=60)
+    except CloudRxError:
+        raise
+    except HTTPError as exc:
+        code = ("viewer" if checking_viewer else
+                "auth" if exc.code in (401, 403) else "quota" if exc.code == 429
+                else "server" if exc.code >= 500 else "redirect" if 300 <= exc.code < 400
+                else "http")
         raise CloudRxError(code, exc.code) from None
     except (TimeoutError, socket.timeout):
         raise CloudRxError("timeout") from None

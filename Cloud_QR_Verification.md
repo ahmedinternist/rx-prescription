@@ -1,4 +1,4 @@
-# Cloud prescription QR verification — 4.82.0
+# Cloud prescription QR verification — 5.7
 
 ## Desktop implementation
 
@@ -22,7 +22,7 @@
 ## Verification performed
 
 - `E:\PDF\python.exe -m pytest -q`: **119 passed**. Networking mocked, application
-  data isolated using `RX_APP_DATA_DIR`. Unsafe legacy `test_headless.py` excluded.
+  data isolated using `RX_APP_DATA_DIR`. The retired destructive smoke script was excluded.
 - Tests cover successful UTF-8/Arabic uploads, optional/brand-only payloads, headers,
   missing/rejected keys, connection/timeout/rate-limit/server errors, redirects,
   malformed responses/URLs, encrypted persistence and safe error output.
@@ -56,8 +56,9 @@ age, license, phone and medication details, including Arabic instructions,
 brand-only and scientific-only items. QR: `output/mobile-cloud-fictitious-qr.png`.
 
 The earlier v4 test initially returned HTTP 500. Its compatibility correction was
-subsequently deployed, and the viewer was later redesigned. The historical patch
-in `backend-compat/` must not be applied over that new mobile layout.
+subsequently deployed, and the viewer was later redesigned. The superseded local
+patch was removed in version 5.9; its implementation remains recoverable from Git
+history and must not be applied over the current mobile layout.
 
 Companion viewer correction committed to GitHub main as
 `6e347f7b92c400fab2a9843c756ba3b5f737a67a`: retain legacy v4 aliases, remove invented
@@ -88,6 +89,24 @@ previous deployment check, not a new deployment during the clinic-location chang
   offline errors, loopback Host/origin/token checks, malformed bodies, one-shot
   responses, simulated permission errors/success, timeout/cancellation, encrypted
   persistence, opt-in payloads, stale callbacks and export snapshot consistency.
+
+## Clinic-website addition — 5.6
+
+- Clinic Identity stores an optional HTTPS clinic website in the existing
+  Windows-encrypted configuration. Bare domains are normalized to HTTPS;
+  credentials, unsafe schemes and malformed URLs are rejected.
+- New cloud records include optional top-level `website`. Legacy inline QR and
+  local prescription payloads omit it, while the QR remains only the short
+  `https://rx-v2.vercel.app/p/<id>` link.
+- Viewer commit `3fd4386` replaces the Active badge with a conditional globe
+  action and keeps the existing phone and validated-location actions.
+- The Next.js 15 production build completed successfully and GitHub reported
+  its Vercel deployment successful. Fictitious record `/p/16d734f9` rendered all
+  three actions, linked the supplied test website and contained no Active badge.
+- Desktop regression: **162 passed**. The focused website, encryption,
+  snapshot and Settings tests passed.
+- Separate executable `dist/RxPrescription-v5.6.exe`, **42,144,955 bytes**.
+  SHA-256: `1E936606033E419E1687A0D38F3E69D2CBCE09A9A56E4FF291D9B0242E93F30B`.
 - Separate updated executable: `dist/ClinicLocation/RxPrescription-v4.82.exe`,
   **42,093,840 bytes**, retaining version **4.82.0** and all previous builds.
   Archive checks confirmed the location helper, validated-coordinate payload,
@@ -98,6 +117,29 @@ previous deployment check, not a new deployment during the clinic-location chang
   No new cloud record, backend deployment, frozen GUI launch or physical printer
   test was performed for this addition. The earlier live QR checks remain above.
 
-Backend seven-day expiry/access policy is unchanged. Link access is not clinician
-signature verification. A shared desktop key is protected at rest, not inaccessible
-to its Windows user.
+## Clinic-title, readiness and retention update — 5.7
+
+- Desktop cloud payloads now include optional `clinicName`. The viewer uses it as
+  the only banner title and falls back to `Electronic Prescription` only when no
+  clinic name is present; no subtitle is rendered.
+- Clinic Identity provides a private local mobile preview using current unsaved
+  clinic values and fictitious prescription content. It performs no upload and
+  writes no preview file or Redis record.
+- QR Verification shows API-key configuration, API/Redis readiness, viewer
+  reachability and the encrypted last-successful-upload timestamp. Its authenticated
+  `GET /api/rx` check uses Redis `PING` and creates no prescription.
+- New Redis records use a **60-day** TTL (`5,184,000` seconds). Existing records
+  were not migrated and retain their original expiry.
+- Viewer commit `d542296` deployed successfully through Vercel. Maps and website
+  links use `noopener noreferrer` and `no-referrer`.
+- Live readiness returned `retentionDays: 60`. Fictitious record `/p/5297cb08`
+  showed `Version 5.7 Test Clinic` as its sole banner title, no `Electronic
+  Prescription` subtitle, and all three phone/location/website actions.
+- Final desktop regression: **171 passed**. The Next.js 15 production build and
+  packaged Windows smoke launch also passed.
+- Separate executable `dist/RxPrescription-v5.7.exe`, **42,153,676 bytes**.
+  SHA-256: `74B0CABBF157DC33E986DE9C5E1909A9615262EB44C3B9661E2DFAE15157E09C`.
+
+Link access is not clinician signature verification. A shared desktop key is
+protected at rest, not inaccessible to its Windows user. Physical printer testing
+was not performed for this release.
