@@ -1,11 +1,40 @@
 # Project status
 
-Updated: 2026-10-03. Application version: **8.0**.
+Updated: 2026-10-16. Application version: **8.0**.
 Repository: https://github.com/ahmedinternist/rx-prescription, branch `main`.
 Implementation commit: `df369a9011df80ae316d826a641d8f2a6ed5e624`.
 This status update is documentation-only; it does not change the executable version.
 
 ## Completed
+
+### Approved local artifact cleanup — 2026-10-16
+
+- Executed only the chat-approved inventory under `E:\Prescription App` after
+  checking all 6,131 exact entries against recorded paths, types, modification
+  times and file hashes. Approved combined plan SHA-256:
+  `454d594b60091e1845c6db8731cf6f8cd0f7700d83de1489f9f0f9e90e98ac54`.
+- Permanently deleted 6,100 listed files/empty directories: generated build
+  intermediates, isolated test/QA artifacts, caches and older
+  `dist/RxPrescription-v7.7.exe` / `dist/RxPrescription-v7.8.exe`.
+- Freed **412,547,798 logical file bytes (393.44 MiB)**, with zero deletion
+  failures. Files were unlinked and only empty directories removed; no recursive
+  deletion or traversal of links/junctions was used.
+- Preserved source, tests, Git history, application data, design assets,
+  historical performance evidence and installed dependencies. Versions 7.9 and
+  8.0 remain in `dist`; their SHA-256 hashes were unchanged after cleanup.
+- Left 31 nonempty test-root directories containing explicitly excluded
+  links/junctions. Removing those links would require a separate exact preview
+  and approval; do not recursively delete those remaining directories.
+- Source/API behavior is unchanged, so the application stays at 8.0. The only
+  tracked file changed by this cleanup session is `PROJECT_STATUS.md`.
+- Verification: Git was clean before the documentation update;
+  `test_api_compatibility.py`: **2 passed in 0.35 seconds**. Ran with
+  `PYTHONDONTWRITEBYTECODE=1`, `python -B`, and isolated data/test directories
+  outside the project so the check did not recreate the deleted project caches.
+  The full regression suite, packaging and live network tests were not rerun for
+  this artifact-only cleanup.
+- Exact next step: perform the fictitious-data packaged-8.0 acceptance pass
+  described below. Any further cleanup of excluded links needs fresh approval.
 
 ### Latest release: 8.0
 
